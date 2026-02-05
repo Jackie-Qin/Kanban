@@ -73,6 +73,21 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     fetchData()
   }, [fetchData])
 
+  // Auto-refresh every 5 seconds when panel is visible
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchData()
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [fetchData])
+
+  // Refresh when window gains focus
+  useEffect(() => {
+    const handleFocus = () => fetchData()
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [fetchData])
+
   // Handle resize
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -128,6 +143,14 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   const handleDiscard = async (file: string) => {
     if (!confirm(`Discard changes to ${file}?`)) return
     await electron.gitDiscard(projectPath, [file])
+    await fetchData()
+  }
+
+  const handleDiscardAll = async () => {
+    const modifiedFiles = unstagedFiles.filter(f => f.status !== 'untracked').map(f => getFileNameFromPath(f.file))
+    if (modifiedFiles.length === 0) return
+    if (!confirm(`Discard all changes to ${modifiedFiles.length} file(s)?`)) return
+    await electron.gitDiscard(projectPath, modifiedFiles)
     await fetchData()
   }
 
@@ -428,13 +451,24 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
               <div>
                 <div className="flex items-center justify-between px-4 py-2 bg-dark-hover sticky top-0 z-10">
                   <span className="text-sm font-medium text-yellow-400">Changes ({unstagedFiles.length})</span>
-                  <button
-                    onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
-                    className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
-                    title="Stage all"
-                  >
-                    + All
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {unstagedFiles.some(f => f.status !== 'untracked') && (
+                      <button
+                        onClick={handleDiscardAll}
+                        className="text-xs px-2 py-0.5 text-dark-muted hover:text-orange-400 hover:bg-dark-border rounded transition-colors"
+                        title="Discard all changes"
+                      >
+                        Revert
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
+                      className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+                      title="Stage all"
+                    >
+                      + All
+                    </button>
+                  </div>
                 </div>
                 {unstagedFiles.map((file, index) => (
                   <div
