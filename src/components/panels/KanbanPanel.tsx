@@ -5,7 +5,7 @@ import { Task } from '../../types'
 interface KanbanPanelParams {
   projectId: string
   projectPath: string
-  onTaskClick: (task: Task) => void
+  onTaskClick: (task: Task, isNew?: boolean) => void
 }
 
 export default function KanbanPanel({ params }: IDockviewPanelProps<KanbanPanelParams>) {

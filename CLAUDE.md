@@ -36,6 +36,10 @@ When updating the release:
 
 Note: The app uses GitHub API to check for updates (no auto-update). Users must manually download and run `xattr -dr com.apple.quarantine /Applications/Kanban.app` after installation.
 
+## Key Architecture Rules
+
+- **Terminal should never refresh** - Terminals persist across project switches. The `TerminalDockPanel` keeps PTY processes alive by rendering all project terminals and hiding inactive ones with CSS visibility.
+
 ## Project Structure
 
 - `src/` - React frontend

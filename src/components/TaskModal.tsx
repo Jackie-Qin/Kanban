@@ -5,26 +5,34 @@ import { Task } from '../types'
 interface TaskModalProps {
   task: Task
   onClose: () => void
+  isNew?: boolean
 }
 
-export default function TaskModal({ task, onClose }: TaskModalProps) {
+export default function TaskModal({ task, onClose, isNew }: TaskModalProps) {
   const { labels, updateTask, deleteTask } = useStore()
-  const [title, setTitle] = useState(task.title)
+  const [title, setTitle] = useState(task.title === 'New Task' ? '' : task.title)
   const [description, setDescription] = useState(task.description)
   const [selectedLabels, setSelectedLabels] = useState<string[]>(task.labels)
   const [dueDate, setDueDate] = useState(task.dueDate || '')
 
+  const handleCancel = () => {
+    if (isNew) {
+      deleteTask(task.id)
+    }
+    onClose()
+  }
+
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') handleCancel()
     }
     window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
-  }, [onClose])
+  }, [isNew])
 
   const handleSave = () => {
     updateTask(task.id, {
-      title,
+      title: title.trim() || 'Untitled',
       description,
       labels: selectedLabels,
       dueDate: dueDate || null
@@ -33,10 +41,13 @@ export default function TaskModal({ task, onClose }: TaskModalProps) {
   }
 
   const handleDelete = () => {
-    if (confirm('Delete this task?')) {
-      deleteTask(task.id)
-      onClose()
-    }
+    deleteTask(task.id)
+    onClose()
+  }
+
+  const handleArchive = () => {
+    updateTask(task.id, { archived: !task.archived })
+    onClose()
   }
 
   const toggleLabel = (labelId: string) => {
@@ -50,7 +61,7 @@ export default function TaskModal({ task, onClose }: TaskModalProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 animate-fadeIn"
-      onClick={onClose}
+      onClick={handleCancel}
     >
       <div
         className="w-full max-w-lg bg-dark-card border border-dark-border rounded-xl shadow-2xl animate-slideUp"
@@ -58,9 +69,9 @@ export default function TaskModal({ task, onClose }: TaskModalProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-dark-border">
-          <h2 className="text-lg font-semibold">Edit Task</h2>
+          <h2 className="text-lg font-semibold">{isNew ? 'New Task' : 'Edit Task'}</h2>
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             className="p-1 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded"
           >
             <svg
@@ -147,15 +158,25 @@ export default function TaskModal({ task, onClose }: TaskModalProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between p-4 border-t border-dark-border">
-          <button
-            onClick={handleDelete}
-            className="px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-          >
-            Delete
-          </button>
           <div className="flex gap-2">
             <button
-              onClick={onClose}
+              onClick={handleDelete}
+              className="px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+            >
+              Delete
+            </button>
+            {!isNew && (
+              <button
+                onClick={handleArchive}
+                className="px-4 py-2 text-sm text-dark-muted hover:bg-dark-hover rounded-lg transition-colors"
+              >
+                {task.archived ? 'Unarchive' : 'Archive'}
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCancel}
               className="px-4 py-2 text-sm bg-dark-hover hover:bg-dark-border rounded-lg transition-colors"
             >
               Cancel

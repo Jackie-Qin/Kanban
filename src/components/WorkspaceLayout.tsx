@@ -16,7 +16,7 @@ import DirectoryPanel from './panels/DirectoryPanel'
 interface WorkspaceLayoutProps {
   projectId: string
   projectPath: string
-  onTaskClick: (task: Task) => void
+  onTaskClick: (task: Task, isNew?: boolean) => void
   onOpenFile?: (filePath: string) => void
 }
 

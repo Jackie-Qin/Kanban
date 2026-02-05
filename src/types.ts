@@ -16,6 +16,7 @@ export interface Task {
   createdAt: string
   order: number
   branch?: string // Linked Git branch name
+  archived?: boolean
 }
 
 export interface Label {

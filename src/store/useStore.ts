@@ -19,7 +19,7 @@ interface AppState extends AppData {
   reorderProjects: (projectIds: string[]) => void
 
   // Tasks
-  addTask: (projectId: string, title: string, column: ColumnId) => void
+  addTask: (projectId: string, title: string, column: ColumnId) => Task
   updateTask: (id: string, updates: Partial<Task>) => void
   deleteTask: (id: string) => void
   moveTask: (taskId: string, toColumn: ColumnId, newOrder: number) => void
@@ -177,6 +177,7 @@ export const useStore = create<AppState>((set, get) => ({
       tasks: [...state.tasks, newTask]
     }))
     get().saveData()
+    return newTask
   },
 
   updateTask: (id, updates) => {

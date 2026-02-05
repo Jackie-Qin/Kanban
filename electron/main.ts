@@ -88,7 +88,20 @@ function checkForUpdates() {
         const latestVersion = release.tag_name?.replace('v', '') || ''
         const currentVersion = app.getVersion()
 
-        if (latestVersion && latestVersion !== currentVersion) {
+        // Compare versions: only show update if latest > current
+        const isNewerVersion = (latest: string, current: string) => {
+          const latestParts = latest.split('.').map(Number)
+          const currentParts = current.split('.').map(Number)
+          for (let i = 0; i < Math.max(latestParts.length, currentParts.length); i++) {
+            const l = latestParts[i] || 0
+            const c = currentParts[i] || 0
+            if (l > c) return true
+            if (l < c) return false
+          }
+          return false
+        }
+
+        if (latestVersion && isNewerVersion(latestVersion, currentVersion)) {
           mainWindow?.webContents.send('update-status', {
             status: 'available',
             version: latestVersion

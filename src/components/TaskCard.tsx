@@ -44,7 +44,7 @@ function generateBranchName(title: string): string {
 }
 
 export default function TaskCard({ task, onClick, isDragging, projectPath, onBranchChange }: TaskCardProps) {
-  const { labels, updateTask } = useStore()
+  const { labels, updateTask, deleteTask } = useStore()
   const [showBranchModal, setShowBranchModal] = useState(false)
   const [branchName, setBranchName] = useState('')
   const [baseBranch, setBaseBranch] = useState('main')
@@ -142,17 +142,40 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
           isDragging ? 'shadow-lg ring-2 ring-blue-500' : ''
         }`}
       >
-        {/* Create Branch button (shown on hover if no branch linked) */}
-        {projectPath && !task.branch && (
+        {/* Hover actions */}
+        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
+          {/* Create Branch button (shown if no branch linked) */}
+          {projectPath && !task.branch && (
+            <button
+              onClick={handleOpenBranchModal}
+              className="p-1 text-dark-muted hover:text-green-400 hover:bg-dark-hover rounded"
+              title="Create branch for this task"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+            </button>
+          )}
+          {/* Delete button */}
           <button
-            onClick={handleOpenBranchModal}
-            className="absolute top-2 right-2 p-1 opacity-0 group-hover:opacity-100 text-dark-muted hover:text-green-400 hover:bg-dark-hover rounded transition-all z-10"
-            title="Create branch for this task"
+            onClick={(e) => {
+              e.stopPropagation()
+              deleteTask(task.id)
+            }}
+            className="p-1 text-dark-muted hover:text-red-400 hover:bg-dark-hover rounded"
+            title="Delete task"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
+        </div>
+
+        {/* Archived indicator */}
+        {task.archived && (
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 text-xs bg-dark-muted/20 text-dark-muted rounded">
+            Archived
+          </div>
         )}
 
         {/* Labels */}

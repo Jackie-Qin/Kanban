@@ -17,15 +17,17 @@ import TaskCard from './TaskCard'
 interface KanbanBoardProps {
   projectId: string
   projectPath?: string
-  onTaskClick: (task: Task) => void
+  onTaskClick: (task: Task, isNew?: boolean) => void
   onBranchChange?: () => void
 }
 
 export default function KanbanBoard({ projectId, projectPath, onTaskClick, onBranchChange }: KanbanBoardProps) {
   const { tasks, moveTask, reorderTasks } = useStore()
   const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
 
-  const projectTasks = tasks.filter((t) => t.projectId === projectId)
+  const projectTasks = tasks.filter((t) => t.projectId === projectId && (showArchived || !t.archived))
+  const archivedCount = tasks.filter((t) => t.projectId === projectId && t.archived).length
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -103,7 +105,27 @@ export default function KanbanBoard({ projectId, projectPath, onTaskClick, onBra
       .sort((a, b) => a.order - b.order)
 
   return (
-    <div className="h-full overflow-x-auto overflow-y-hidden p-4 hide-scrollbar">
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* Archive toggle */}
+      {archivedCount > 0 && (
+        <div className="flex-shrink-0 px-4 pt-2 pb-1">
+          <button
+            onClick={() => setShowArchived(!showArchived)}
+            className="flex items-center gap-2 text-sm text-dark-muted hover:text-dark-text transition-colors"
+          >
+            <svg
+              className={`w-4 h-4 transition-transform ${showArchived ? 'rotate-90' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <span>{showArchived ? 'Hide' : 'Show'} archived ({archivedCount})</span>
+          </button>
+        </div>
+      )}
+      <div className="flex-1 overflow-x-auto overflow-y-hidden p-4 pt-2 hide-scrollbar">
       <DndContext
         sensors={sensors}
         onDragStart={handleDragStart}
@@ -134,6 +156,7 @@ export default function KanbanBoard({ projectId, projectPath, onTaskClick, onBra
           )}
         </DragOverlay>
       </DndContext>
+      </div>
     </div>
   )
 }

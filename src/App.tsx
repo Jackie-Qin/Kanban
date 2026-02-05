@@ -10,12 +10,13 @@ import UpdateNotification from './components/UpdateNotification'
 import { Task } from './types'
 
 type SearchMode = 'files' | 'text'
+type SelectedTask = { task: Task; isNew?: boolean } | null
 
 export default function App() {
   const { isLoading, loadData, projects, activeProjectId } = useStore()
   const [showAddProject, setShowAddProject] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [selectedTask, setSelectedTask] = useState<SelectedTask>(null)
   const [searchMode, setSearchMode] = useState<SearchMode | null>(null)
 
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function App() {
           <WorkspaceLayout
             projectId={activeProject.id}
             projectPath={activeProject.path}
-            onTaskClick={setSelectedTask}
+            onTaskClick={(task, isNew) => setSelectedTask({ task, isNew })}
           />
         </div>
       ) : (
@@ -95,7 +96,8 @@ export default function App() {
 
       {selectedTask && (
         <TaskModal
-          task={selectedTask}
+          task={selectedTask.task}
+          isNew={selectedTask.isNew}
           onClose={() => setSelectedTask(null)}
         />
       )}
