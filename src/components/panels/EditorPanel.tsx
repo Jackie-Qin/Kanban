@@ -447,13 +447,7 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
       <div className="flex-1 min-h-0">
         {activeFile ? (
           activeFile.showDiff && activeFile.gitOriginal !== undefined ? (
-            <div className={`h-full ${diffViewMode === 'inline' ? 'diff-inline-mode' : ''}`}>
-              <style>{`
-                /* Hide diff overview minimap in inline mode */
-                .diff-inline-mode .monaco-diff-editor .diffOverview {
-                  display: none !important;
-                }
-              `}</style>
+            <div className="h-full">
               <DiffEditor
                 height="100%"
                 language={getLanguage(activeFile.name)}

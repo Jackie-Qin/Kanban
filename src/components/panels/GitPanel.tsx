@@ -383,99 +383,97 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
       <div className="flex-1 overflow-hidden flex flex-col">
         {/* Changes section (resizable) */}
         <div style={{ height: changesHeight }} className="flex flex-col overflow-hidden border-b border-dark-border">
-          {/* Staged Changes */}
-          <div className="border-b border-dark-border">
-            <div className="flex items-center justify-between px-4 py-2 bg-dark-hover">
-              <span className="text-sm font-medium text-green-400">Staged ({stagedFiles.length})</span>
-              {stagedFiles.length > 0 && (
-                <button
-                  onClick={() => handleUnstage(stagedFiles.map(f => getFileNameFromPath(f.file)))}
-                  className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
-                  title="Unstage all"
-                >
-                  − All
-                </button>
-              )}
-            </div>
-            <div className="overflow-auto max-h-24">
-              {stagedFiles.map((file, index) => (
-                <div
-                  key={`${file.file}-${index}`}
-                  className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
-                  onClick={() => handleOpenChangedFile(file)}
-                >
-                  <span className="w-4 flex-shrink-0 flex items-center justify-center">
-                    {getStatusIcon(file.status)}
-                  </span>
-                  <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
-                    {file.file}
-                  </span>
+          <div className="overflow-auto flex-1">
+            {/* Staged Changes */}
+            {stagedFiles.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between px-4 py-2 bg-dark-hover sticky top-0 z-10">
+                  <span className="text-sm font-medium text-green-400">Staged ({stagedFiles.length})</span>
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleUnstage([getFileNameFromPath(file.file)]) }}
-                    className="p-1 opacity-0 group-hover:opacity-100 text-dark-muted hover:text-red-400 transition-all"
-                    title="Unstage"
+                    onClick={() => handleUnstage(stagedFiles.map(f => getFileNameFromPath(f.file)))}
+                    className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+                    title="Unstage all"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-                    </svg>
+                    − All
                   </button>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Unstaged Changes */}
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-4 py-2 bg-dark-hover">
-              <span className="text-sm font-medium text-yellow-400">Changes ({unstagedFiles.length})</span>
-              {unstagedFiles.length > 0 && (
-                <button
-                  onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
-                  className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
-                  title="Stage all"
-                >
-                  + All
-                </button>
-              )}
-            </div>
-            <div className="overflow-auto flex-1">
-              {unstagedFiles.map((file, index) => (
-                <div
-                  key={`${file.file}-${index}`}
-                  className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
-                  onClick={() => handleOpenChangedFile(file)}
-                >
-                  <span className="w-4 flex-shrink-0 flex items-center justify-center">
-                    {getStatusIcon(file.status)}
-                  </span>
-                  <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
-                    {file.file}
-                  </span>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                    {file.status !== 'untracked' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDiscard(getFileNameFromPath(file.file)) }}
-                        className="p-1 text-dark-muted hover:text-orange-400"
-                        title="Discard changes"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                        </svg>
-                      </button>
-                    )}
+                {stagedFiles.map((file, index) => (
+                  <div
+                    key={`staged-${file.file}-${index}`}
+                    className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
+                    onClick={() => handleOpenChangedFile(file)}
+                  >
+                    <span className="w-4 flex-shrink-0 flex items-center justify-center">
+                      {getStatusIcon(file.status)}
+                    </span>
+                    <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
+                      {file.file}
+                    </span>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleStage([getFileNameFromPath(file.file)]) }}
-                      className="p-1 text-dark-muted hover:text-green-400"
-                      title="Stage"
+                      onClick={(e) => { e.stopPropagation(); handleUnstage([getFileNameFromPath(file.file)]) }}
+                      className="p-1 opacity-0 group-hover:opacity-100 text-dark-muted hover:text-red-400 transition-all"
+                      title="Unstage"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                       </svg>
                     </button>
                   </div>
+                ))}
+              </div>
+            )}
+
+            {/* Unstaged Changes */}
+            {unstagedFiles.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between px-4 py-2 bg-dark-hover sticky top-0 z-10">
+                  <span className="text-sm font-medium text-yellow-400">Changes ({unstagedFiles.length})</span>
+                  <button
+                    onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
+                    className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+                    title="Stage all"
+                  >
+                    + All
+                  </button>
                 </div>
-              ))}
-            </div>
+                {unstagedFiles.map((file, index) => (
+                  <div
+                    key={`unstaged-${file.file}-${index}`}
+                    className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
+                    onClick={() => handleOpenChangedFile(file)}
+                  >
+                    <span className="w-4 flex-shrink-0 flex items-center justify-center">
+                      {getStatusIcon(file.status)}
+                    </span>
+                    <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
+                      {file.file}
+                    </span>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      {file.status !== 'untracked' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDiscard(getFileNameFromPath(file.file)) }}
+                          className="p-1 text-dark-muted hover:text-orange-400"
+                          title="Discard changes"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                          </svg>
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleStage([getFileNameFromPath(file.file)]) }}
+                        className="p-1 text-dark-muted hover:text-green-400"
+                        title="Stage"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

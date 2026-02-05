@@ -76,8 +76,13 @@ function FileTreeItem({
             )}
           </span>
         )}
-        {!node.isDirectory && <span className="w-4 flex-shrink-0" />}
-        <FileIcon name={node.name} isDirectory={node.isDirectory} isExpanded={node.isExpanded} className="w-4 h-4 flex-shrink-0" />
+        {/* For files: spacer for chevron alignment + file icon (VS Code style - no folder icons) */}
+        {!node.isDirectory && (
+          <>
+            <span className="w-4 flex-shrink-0" />
+            <FileIcon name={node.name} isDirectory={false} className="w-4 h-4 flex-shrink-0" />
+          </>
+        )}
         <span
           className={`truncate ${node.isHidden ? 'text-dark-muted' : 'text-dark-text'}`}
         >

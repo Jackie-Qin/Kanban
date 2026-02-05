@@ -26,13 +26,17 @@ export function createPty(
 
   const shell = process.env.SHELL || '/bin/zsh'
 
+  // Clean environment for PTY - remove npm_config_prefix which conflicts with nvm
+  const cleanEnv = { ...process.env }
+  delete cleanEnv.npm_config_prefix
+
   try {
     const ptyProcess = pty.spawn(shell, [], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: cwd,
-      env: process.env as { [key: string]: string }
+      env: cleanEnv as { [key: string]: string }
     })
 
     ptyProcess.onData((data) => {
