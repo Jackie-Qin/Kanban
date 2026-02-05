@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import { electron, GitStatus, GitBranch, GitCommit, GitDiffFile, GitChangedFile } from '../../lib/electron'
+import FileIcon from '../FileIcon'
 
 interface GitPanelParams {
   projectId: string
@@ -39,6 +40,10 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   const [isPulling, setIsPulling] = useState(false)
   const [isCommitting, setIsCommitting] = useState(false)
 
+  // Hover tooltip
+  const [hoveredCommit, setHoveredCommit] = useState<{ commit: GitCommit & { files: GitDiffFile[] }; x: number; y: number } | null>(null)
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
   // Resizable sections
   const [changesHeight, setChangesHeight] = useState(200)
   const [isDragging, setIsDragging] = useState(false)
@@ -73,13 +78,18 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     fetchData()
   }, [fetchData])
 
-  // Auto-refresh every 5 seconds when panel is visible
+  // Watch .git directory for changes
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchData()
-    }, 5000)
-    return () => clearInterval(interval)
-  }, [fetchData])
+    if (!projectPath) return
+    electron.gitWatch(projectPath)
+    const unsubscribe = electron.onGitChanged((changedPath) => {
+      if (changedPath === projectPath) fetchData()
+    })
+    return () => {
+      unsubscribe()
+      electron.gitUnwatch(projectPath)
+    }
+  }, [projectPath, fetchData])
 
   // Refresh when window gains focus
   useEffect(() => {
@@ -216,35 +226,26 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     )
   }
 
-  const getStatusIcon = (status: GitChangedFile['status']) => {
-    switch (status) {
-      case 'modified':
-        return <span className="text-yellow-400 font-bold text-xs">M</span>
-      case 'staged':
-        return <span className="text-green-400 font-bold text-xs">A</span>
-      case 'untracked':
-        return <span className="text-gray-400 font-bold text-xs">U</span>
-      case 'deleted':
-        return <span className="text-red-400 font-bold text-xs">D</span>
-      case 'renamed':
-        return <span className="text-blue-400 font-bold text-xs">R</span>
-      case 'conflicted':
-        return <span className="text-orange-400 font-bold text-xs">!</span>
-      default:
-        return null
-    }
+  const handleCommitHover = (commit: GitCommit, e: React.MouseEvent) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+    hoverTimeoutRef.current = setTimeout(async () => {
+      try {
+        const details = await electron.gitCommitDetails(projectPath, commit.hash)
+        const x = Math.min(e.clientX, window.innerWidth - 340)
+        const y = Math.min(e.clientY + 10, window.innerHeight - 250)
+        setHoveredCommit({ commit: details, x, y })
+      } catch {
+        // ignore
+      }
+    }, 500)
   }
 
-  const getStatusColor = (status: GitChangedFile['status']) => {
-    switch (status) {
-      case 'modified': return 'text-yellow-400'
-      case 'staged': return 'text-green-400'
-      case 'untracked': return 'text-gray-400'
-      case 'deleted': return 'text-red-400'
-      case 'renamed': return 'text-blue-400'
-      case 'conflicted': return 'text-orange-400'
-      default: return ''
+  const handleCommitHoverLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
+      hoverTimeoutRef.current = null
     }
+    setHoveredCommit(null)
   }
 
   const getFileNameFromPath = (file: string) => {
@@ -252,6 +253,25 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
       return file.split(' → ')[1]
     }
     return file
+  }
+
+  const getFileDisplayParts = (filePath: string) => {
+    const parts = filePath.split('/')
+    const filename = parts[parts.length - 1]
+    const directory = parts.length > 1 ? parts.slice(0, -1).join('/') : ''
+    return { filename, directory }
+  }
+
+  const getStatusLetter = (file: GitChangedFile): { letter: string; color: string } => {
+    switch (file.status) {
+      case 'modified': return { letter: 'M', color: 'text-yellow-400' }
+      case 'staged': return { letter: 'A', color: 'text-green-400' }
+      case 'untracked': return { letter: 'U', color: 'text-gray-400' }
+      case 'deleted': return { letter: 'D', color: 'text-red-400' }
+      case 'renamed': return { letter: 'R', color: 'text-blue-400' }
+      case 'conflicted': return { letter: '!', color: 'text-orange-400' }
+      default: return { letter: '?', color: 'text-dark-muted' }
+    }
   }
 
   if (!status?.isRepo) {
@@ -386,11 +406,10 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
             {/* Refresh button */}
             <button
               onClick={fetchData}
-              disabled={isLoading}
-              className="p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors disabled:opacity-50"
+              className="p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors"
               title="Refresh"
             >
-              <svg className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
@@ -420,29 +439,36 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
                     − All
                   </button>
                 </div>
-                {stagedFiles.map((file, index) => (
-                  <div
-                    key={`staged-${file.file}-${index}`}
-                    className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
-                    onClick={() => handleOpenChangedFile(file)}
-                  >
-                    <span className="w-4 flex-shrink-0 flex items-center justify-center">
-                      {getStatusIcon(file.status)}
-                    </span>
-                    <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
-                      {file.file}
-                    </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleUnstage([getFileNameFromPath(file.file)]) }}
-                      className="p-1 opacity-0 group-hover:opacity-100 text-dark-muted hover:text-red-400 transition-all"
-                      title="Unstage"
+                {stagedFiles.map((file, index) => {
+                  const { filename, directory } = getFileDisplayParts(file.file)
+                  const statusInfo = getStatusLetter(file)
+                  return (
+                    <div
+                      key={`staged-${file.file}-${index}`}
+                      className="flex items-center gap-2 px-4 py-1 hover:bg-dark-hover cursor-pointer group"
+                      onClick={() => handleOpenChangedFile(file)}
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
+                      <FileIcon name={filename} className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm truncate">{filename}</span>
+                      {directory && (
+                        <span className="text-xs text-dark-muted truncate">{directory}</span>
+                      )}
+                      <span className="flex-1" />
+                      <span className={`text-xs font-mono ${statusInfo.color} group-hover:hidden flex-shrink-0`}>
+                        {statusInfo.letter}
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleUnstage([getFileNameFromPath(file.file)]) }}
+                        className="p-1 hidden group-hover:block text-dark-muted hover:text-red-400 transition-all flex-shrink-0"
+                        title="Unstage"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                        </svg>
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             )}
 
@@ -470,42 +496,49 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
                     </button>
                   </div>
                 </div>
-                {unstagedFiles.map((file, index) => (
-                  <div
-                    key={`unstaged-${file.file}-${index}`}
-                    className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
-                    onClick={() => handleOpenChangedFile(file)}
-                  >
-                    <span className="w-4 flex-shrink-0 flex items-center justify-center">
-                      {getStatusIcon(file.status)}
-                    </span>
-                    <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
-                      {file.file}
-                    </span>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                      {file.status !== 'untracked' && (
+                {unstagedFiles.map((file, index) => {
+                  const { filename, directory } = getFileDisplayParts(file.file)
+                  const statusInfo = getStatusLetter(file)
+                  return (
+                    <div
+                      key={`unstaged-${file.file}-${index}`}
+                      className="flex items-center gap-2 px-4 py-1 hover:bg-dark-hover cursor-pointer group"
+                      onClick={() => handleOpenChangedFile(file)}
+                    >
+                      <FileIcon name={filename} className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm truncate">{filename}</span>
+                      {directory && (
+                        <span className="text-xs text-dark-muted truncate">{directory}</span>
+                      )}
+                      <span className="flex-1" />
+                      <span className={`text-xs font-mono ${statusInfo.color} group-hover:hidden flex-shrink-0`}>
+                        {statusInfo.letter}
+                      </span>
+                      <div className="hidden group-hover:flex items-center gap-1 flex-shrink-0">
+                        {file.status !== 'untracked' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDiscard(getFileNameFromPath(file.file)) }}
+                            className="p-1 text-dark-muted hover:text-orange-400"
+                            title="Discard changes"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                            </svg>
+                          </button>
+                        )}
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleDiscard(getFileNameFromPath(file.file)) }}
-                          className="p-1 text-dark-muted hover:text-orange-400"
-                          title="Discard changes"
+                          onClick={(e) => { e.stopPropagation(); handleStage([getFileNameFromPath(file.file)]) }}
+                          className="p-1 text-dark-muted hover:text-green-400"
+                          title="Stage"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                           </svg>
                         </button>
-                      )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleStage([getFileNameFromPath(file.file)]) }}
-                        className="p-1 text-dark-muted hover:text-green-400"
-                        title="Stage"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                      </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -537,28 +570,135 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
           </div>
         )}
 
-        {/* Recent Commits */}
+        {/* Recent Commits with Graph */}
         <div className="flex-1 overflow-hidden flex flex-col">
           <div className="px-4 py-2 bg-dark-hover text-sm font-medium flex-shrink-0">
             Recent Commits
           </div>
           <div className="overflow-auto flex-1">
-            {commits.map((commit) => (
-              <div
-                key={commit.hash}
-                className="px-4 py-2 hover:bg-dark-hover cursor-pointer border-b border-dark-border"
-                onClick={() => handleCommitClick(commit)}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-blue-400 font-mono text-xs">{commit.shortHash}</span>
-                  <span className="text-sm truncate flex-1">{commit.message}</span>
-                  <span className="text-xs text-dark-muted">{formatRelativeTime(commit.date)}</span>
+            {commits.map((commit, index) => {
+              const isLocal = status ? index < status.ahead : false
+              const isFirst = index === 0
+              const isLast = index === commits.length - 1
+              const isOriginHead = status ? index === status.ahead : false
+              const dotColor = isLocal ? 'bg-green-400' : 'bg-blue-400'
+              const lineColor = isLocal ? 'bg-green-400/40' : 'bg-blue-400/40'
+              // Next commit's line color (for bottom segment)
+              const nextIsLocal = status ? (index + 1) < status.ahead : false
+              const bottomLineColor = isLast ? 'bg-transparent' : (nextIsLocal ? 'bg-green-400/40' : 'bg-blue-400/40')
+
+              return (
+                <div
+                  key={commit.hash}
+                  className="flex hover:bg-dark-hover cursor-pointer"
+                  onClick={() => handleCommitClick(commit)}
+                  onMouseEnter={(e) => handleCommitHover(commit, e)}
+                  onMouseLeave={handleCommitHoverLeave}
+                >
+                  {/* Graph column */}
+                  <div className="w-8 flex-shrink-0 flex flex-col items-center">
+                    {/* Top line segment */}
+                    <div className={`w-0.5 flex-1 ${isFirst ? 'bg-transparent' : lineColor}`} />
+                    {/* Dot */}
+                    <div className={`w-2.5 h-2.5 rounded-full ${dotColor} flex-shrink-0`} />
+                    {/* Bottom line segment */}
+                    <div className={`w-0.5 flex-1 ${bottomLineColor}`} />
+                  </div>
+
+                  {/* Commit info */}
+                  <div className="flex-1 min-w-0 py-1.5 pr-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm truncate flex-1">{commit.message}</span>
+                      <span className="text-xs text-dark-muted flex-shrink-0">{formatRelativeTime(commit.date)}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className={`font-mono text-[10px] ${isLocal ? 'text-green-400/70' : 'text-blue-400/70'}`}>{commit.shortHash}</span>
+                      {/* Local HEAD badge */}
+                      {isFirst && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-medium bg-green-400/15 text-green-400 border border-green-400/30">
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                          </svg>
+                          {status?.branch}
+                        </span>
+                      )}
+                      {/* Origin HEAD badge */}
+                      {isOriginHead && status && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-medium bg-blue-400/15 text-blue-400 border border-blue-400/30">
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                          </svg>
+                          origin/{status.branch}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>
+
+      {/* Commit Hover Tooltip */}
+      {hoveredCommit && (
+        <div
+          className="fixed z-50 bg-dark-card border border-dark-border rounded-lg shadow-xl p-3 w-80"
+          style={{ left: hoveredCommit.x, top: hoveredCommit.y }}
+          onMouseEnter={() => {
+            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+          }}
+          onMouseLeave={handleCommitHoverLeave}
+        >
+          <div className="flex items-center gap-2.5 mb-2">
+            <img
+              src={`https://github.com/${hoveredCommit.commit.author}.png?size=64`}
+              alt=""
+              className="w-8 h-8 rounded-full flex-shrink-0 bg-dark-hover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-dark-text">{hoveredCommit.commit.author}</div>
+              <div className="text-xs text-dark-muted">
+                {formatRelativeTime(hoveredCommit.commit.date)} ({new Date(hoveredCommit.commit.date).toLocaleString()})
+              </div>
+            </div>
+          </div>
+          <div className="text-sm mb-2 break-words">{hoveredCommit.commit.message}</div>
+          <div className="space-y-1 text-xs text-dark-muted">
+            {hoveredCommit.commit.files && hoveredCommit.commit.files.length > 0 && (
+              <div className="flex items-center gap-2 pt-1 border-t border-dark-border mt-1">
+                <span>{hoveredCommit.commit.files.length} file{hoveredCommit.commit.files.length !== 1 ? 's' : ''}</span>
+                {(() => {
+                  const ins = hoveredCommit.commit.files.reduce((s, f) => s + f.insertions, 0)
+                  const del = hoveredCommit.commit.files.reduce((s, f) => s + f.deletions, 0)
+                  return (
+                    <>
+                      {ins > 0 && <span className="text-green-400">+{ins}</span>}
+                      {del > 0 && <span className="text-red-400">-{del}</span>}
+                    </>
+                  )
+                })()}
+              </div>
+            )}
+            <div className="flex items-center gap-1 pt-1 border-t border-dark-border mt-1">
+              <span className="font-mono text-[10px] text-dark-muted">{hoveredCommit.commit.hash}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  navigator.clipboard.writeText(hoveredCommit.commit.hash)
+                }}
+                className="p-0.5 text-dark-muted hover:text-dark-text"
+                title="Copy full hash"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Commit Details Modal */}
       {selectedCommit && (

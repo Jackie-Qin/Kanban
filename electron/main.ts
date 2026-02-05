@@ -14,6 +14,11 @@ let autoSyncEnabled = false
 let fileWatcher: fs.FSWatcher | null = null
 let lastSaveTime = 0 // Track when we last saved to avoid reload loops
 
+// Git directory watchers with ref-counting
+const gitWatchers: Map<string, fs.FSWatcher> = new Map()
+const gitWatcherRefs: Map<string, number> = new Map()
+const gitWatchDebounces: Map<string, NodeJS.Timeout> = new Map()
+
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -96,6 +101,68 @@ function stopFileWatcher() {
     fileWatcher.close()
     fileWatcher = null
   }
+}
+
+function startGitWatcher(projectPath: string) {
+  const refs = gitWatcherRefs.get(projectPath) || 0
+  gitWatcherRefs.set(projectPath, refs + 1)
+
+  if (gitWatchers.has(projectPath)) return // Already watching
+
+  const gitDir = path.join(projectPath, '.git')
+  if (!fs.existsSync(gitDir)) return
+
+  try {
+    const watcher = fs.watch(gitDir, { recursive: true }, (_eventType, filename) => {
+      if (!filename) return
+      // Ignore lock files and temp files
+      if (filename.endsWith('.lock') || filename === 'COMMIT_EDITMSG') return
+
+      // Debounce per project
+      const existing = gitWatchDebounces.get(projectPath)
+      if (existing) clearTimeout(existing)
+      gitWatchDebounces.set(projectPath, setTimeout(() => {
+        gitWatchDebounces.delete(projectPath)
+        mainWindow?.webContents.send('git-changed', projectPath)
+      }, 300))
+    })
+
+    gitWatchers.set(projectPath, watcher)
+  } catch (error) {
+    console.error('Failed to watch .git directory:', error)
+  }
+}
+
+function stopGitWatcher(projectPath: string) {
+  const refs = (gitWatcherRefs.get(projectPath) || 1) - 1
+  if (refs > 0) {
+    gitWatcherRefs.set(projectPath, refs)
+    return
+  }
+
+  gitWatcherRefs.delete(projectPath)
+  const watcher = gitWatchers.get(projectPath)
+  if (watcher) {
+    watcher.close()
+    gitWatchers.delete(projectPath)
+  }
+  const debounce = gitWatchDebounces.get(projectPath)
+  if (debounce) {
+    clearTimeout(debounce)
+    gitWatchDebounces.delete(projectPath)
+  }
+}
+
+function stopAllGitWatchers() {
+  for (const [, watcher] of gitWatchers) {
+    watcher.close()
+  }
+  gitWatchers.clear()
+  gitWatcherRefs.clear()
+  for (const [, timeout] of gitWatchDebounces) {
+    clearTimeout(timeout)
+  }
+  gitWatchDebounces.clear()
 }
 
 function setAutoSync(enabled: boolean) {
@@ -326,6 +393,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   killAllPty()
   stopFileWatcher()
+  stopAllGitWatchers()
 })
 
 // IPC Handlers
@@ -355,6 +423,17 @@ ipcMain.handle('update-check', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion()
+})
+
+// Git Watcher Handlers
+ipcMain.handle('git-watch', (_event, projectPath: string) => {
+  startGitWatcher(projectPath)
+  return true
+})
+
+ipcMain.handle('git-unwatch', (_event, projectPath: string) => {
+  stopGitWatcher(projectPath)
+  return true
 })
 
 ipcMain.handle('open-external', (_event, url: string) => {
@@ -542,6 +621,7 @@ interface GitCommit {
   shortHash: string
   message: string
   author: string
+  authorEmail?: string
   date: string
   filesChanged?: number
   insertions?: number
@@ -695,6 +775,7 @@ ipcMain.handle('git-log', async (_event, projectPath: string, branch?: string, l
       shortHash: commit.hash.substring(0, 7),
       message: commit.message,
       author: commit.author_name,
+      authorEmail: commit.author_email,
       date: commit.date
     }))
   } catch (error) {
@@ -706,18 +787,19 @@ ipcMain.handle('git-log', async (_event, projectPath: string, branch?: string, l
 ipcMain.handle('git-commit-details', async (_event, projectPath: string, hash: string): Promise<GitCommit & { files: GitDiffFile[] }> => {
   try {
     const git = getGit(projectPath)
-    const show = await git.show([hash, '--stat', '--format=%H%n%s%n%an%n%aI'])
+    const show = await git.show([hash, '--stat', '--format=%H%n%s%n%an%n%ae%n%aI'])
 
     // Parse the output
     const lines = show.split('\n')
     const fullHash = lines[0]
     const message = lines[1]
     const author = lines[2]
-    const date = lines[3]
+    const authorEmail = lines[3]
+    const date = lines[4]
 
     // Parse file stats
     const files: GitDiffFile[] = []
-    for (let i = 5; i < lines.length - 2; i++) {
+    for (let i = 6; i < lines.length - 2; i++) {
       const line = lines[i]
       if (line.includes('|')) {
         const parts = line.split('|')
@@ -739,6 +821,7 @@ ipcMain.handle('git-commit-details', async (_event, projectPath: string, hash: s
       shortHash: fullHash.substring(0, 7),
       message,
       author,
+      authorEmail,
       date,
       files
     }

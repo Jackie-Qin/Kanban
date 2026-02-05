@@ -168,7 +168,7 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
         if (showDiff && !existingFile.gitOriginal && gitProjectPath && gitRelativePath) {
           const gitOriginal = await electron.gitShowFile(gitProjectPath, gitRelativePath)
           setOpenFiles((prev) =>
-            prev.map((f) => (f.path === filePath ? { ...f, isPreview: isPreview ? f.isPreview : false, showDiff, gitOriginal: gitOriginal || f.content } : f))
+            prev.map((f) => (f.path === filePath ? { ...f, isPreview: isPreview ? f.isPreview : false, showDiff, gitOriginal: gitOriginal ?? '' } : f))
           )
         } else {
           setOpenFiles((prev) =>
@@ -198,10 +198,10 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
         try {
           // Get the file content from HEAD
           const result = await electron.gitShowFile(gitProjectPath, gitRelativePath)
-          gitOriginal = result || content // Fall back to current content if file is new
+          gitOriginal = result ?? '' // New/untracked files show as entirely added
         } catch (e) {
           console.error('Failed to get git original:', e)
-          gitOriginal = content
+          gitOriginal = ''
         }
       }
 

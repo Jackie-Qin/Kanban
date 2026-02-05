@@ -29,6 +29,7 @@ export interface GitCommit {
   shortHash: string
   message: string
   author: string
+  authorEmail?: string
   date: string
   filesChanged?: number
   insertions?: number
@@ -106,6 +107,10 @@ declare global {
       gitCommit: (projectPath: string, message: string) => Promise<boolean>
       gitPush: (projectPath: string) => Promise<boolean>
       gitPull: (projectPath: string) => Promise<boolean>
+      // Git Watcher methods
+      gitWatch: (projectPath: string) => Promise<boolean>
+      gitUnwatch: (projectPath: string) => Promise<boolean>
+      onGitChanged: (callback: (projectPath: string) => void) => () => void
       // Auto Sync methods
       getAutoSync: () => Promise<boolean>
       setAutoSync: (enabled: boolean) => Promise<boolean>

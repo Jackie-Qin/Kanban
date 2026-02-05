@@ -29,6 +29,7 @@ interface GitCommit {
   shortHash: string
   message: string
   author: string
+  authorEmail?: string
   date: string
   filesChanged?: number
   insertions?: number
@@ -133,6 +134,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git-push', projectPath),
   gitPull: (projectPath: string): Promise<boolean> =>
     ipcRenderer.invoke('git-pull', projectPath),
+
+  // Git Watcher methods
+  gitWatch: (projectPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('git-watch', projectPath),
+  gitUnwatch: (projectPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('git-unwatch', projectPath),
+  onGitChanged: (callback: (projectPath: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, projectPath: string) => {
+      callback(projectPath)
+    }
+    ipcRenderer.on('git-changed', listener)
+    return () => ipcRenderer.removeListener('git-changed', listener)
+  },
 
   // Auto Sync methods
   getAutoSync: (): Promise<boolean> => ipcRenderer.invoke('get-auto-sync'),
