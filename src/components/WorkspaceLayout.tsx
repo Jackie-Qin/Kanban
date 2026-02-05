@@ -17,6 +17,7 @@ interface WorkspaceLayoutProps {
   projectId: string
   projectPath: string
   onTaskClick: (task: Task) => void
+  onOpenFile?: (filePath: string) => void
 }
 
 // Component registry for Dockview
@@ -40,7 +41,8 @@ const PANEL_OPTIONS = [
 export default function WorkspaceLayout({
   projectId,
   projectPath,
-  onTaskClick
+  onTaskClick,
+  onOpenFile
 }: WorkspaceLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null)
   const { layouts, saveLayout } = useStore()
@@ -177,6 +179,29 @@ export default function WorkspaceLayout({
     window.addEventListener('panel:focus', handlePanelFocus)
     return () => window.removeEventListener('panel:focus', handlePanelFocus)
   }, [])
+
+  // Listen for open-file events from SearchModal
+  useEffect(() => {
+    const handleOpenFile = (e: Event) => {
+      const customEvent = e as CustomEvent<{ filePath: string }>
+      const { filePath } = customEvent.detail
+
+      // Dispatch to editor panel
+      if (apiRef.current) {
+        const editorPanel = apiRef.current.getPanel('editor')
+        if (editorPanel) {
+          editorPanel.api.setActive()
+          // Use the onOpenFile callback or dispatch event to editor
+          window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { filePath } }))
+        }
+      }
+
+      onOpenFile?.(filePath)
+    }
+
+    window.addEventListener('workspace:open-file', handleOpenFile)
+    return () => window.removeEventListener('workspace:open-file', handleOpenFile)
+  }, [onOpenFile])
 
   // Handle Dockview ready event
   const onReady = useCallback(

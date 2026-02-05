@@ -42,9 +42,28 @@ export interface GitDiffFile {
   binary: boolean
 }
 
+export interface GitChangedFile {
+  file: string
+  status: 'modified' | 'staged' | 'untracked' | 'deleted' | 'renamed' | 'conflicted'
+  staged: boolean
+}
+
 export interface UpdateStatus {
   status: 'checking' | 'available' | 'not-available'
   version?: string
+}
+
+export interface SearchFileResult {
+  path: string
+  name: string
+  relativePath: string
+}
+
+export interface SearchTextResult {
+  path: string
+  relativePath: string
+  line: number
+  content: string
 }
 
 declare global {
@@ -72,10 +91,12 @@ declare global {
       fsExists: (targetPath: string) => Promise<boolean>
       // Git methods
       gitStatus: (projectPath: string) => Promise<GitStatus>
+      gitChangedFiles: (projectPath: string) => Promise<GitChangedFile[]>
       gitBranches: (projectPath: string) => Promise<GitBranch[]>
       gitLog: (projectPath: string, branch?: string, limit?: number) => Promise<GitCommit[]>
       gitCommitDetails: (projectPath: string, hash: string) => Promise<GitCommit & { files: GitDiffFile[] }>
       gitDiff: (projectPath: string, file: string, hash?: string) => Promise<string>
+      gitShowFile: (projectPath: string, file: string, ref?: string) => Promise<string | null>
       gitCheckout: (projectPath: string, branch: string) => Promise<boolean>
       gitCreateBranch: (projectPath: string, branchName: string, baseBranch?: string) => Promise<boolean>
       gitDeleteBranch: (projectPath: string, branchName: string) => Promise<boolean>
@@ -87,6 +108,9 @@ declare global {
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
       // Shell methods
       openExternal: (url: string) => Promise<void>
+      // Search methods
+      searchFiles: (projectPath: string, query: string) => Promise<SearchFileResult[]>
+      searchText: (projectPath: string, query: string) => Promise<SearchTextResult[]>
     }
   }
 }

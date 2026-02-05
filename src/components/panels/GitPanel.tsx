@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { IDockviewPanelProps } from 'dockview'
-import { electron, GitStatus, GitBranch, GitCommit, GitDiffFile } from '../../lib/electron'
+import { electron, GitStatus, GitBranch, GitCommit, GitDiffFile, GitChangedFile } from '../../lib/electron'
 
 interface GitPanelParams {
   projectId: string
@@ -26,6 +26,7 @@ function formatRelativeTime(dateStr: string): string {
 export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>) {
   const { projectPath } = params
   const [status, setStatus] = useState<GitStatus | null>(null)
+  const [changedFiles, setChangedFiles] = useState<GitChangedFile[]>([])
   const [branches, setBranches] = useState<GitBranch[]>([])
   const [commits, setCommits] = useState<GitCommit[]>([])
   const [selectedCommit, setSelectedCommit] = useState<(GitCommit & { files: GitDiffFile[] }) | null>(null)
@@ -39,13 +40,15 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
 
     setIsLoading(true)
     try {
-      const [statusResult, branchesResult, commitsResult] = await Promise.all([
+      const [statusResult, changedFilesResult, branchesResult, commitsResult] = await Promise.all([
         electron.gitStatus(projectPath),
+        electron.gitChangedFiles(projectPath),
         electron.gitBranches(projectPath),
         electron.gitLog(projectPath, undefined, 20)
       ])
 
       setStatus(statusResult)
+      setChangedFiles(changedFilesResult)
       setBranches(branchesResult)
       setCommits(commitsResult)
 
@@ -89,6 +92,10 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     const success = await electron.gitDeleteBranch(projectPath, branchName)
     if (success) {
       await fetchData()
+    } else {
+      alert(`Failed to delete branch "${branchName}". It may not exist or is the current branch.`)
+      // Refresh anyway to update stale branches
+      await fetchData()
     }
   }
 
@@ -106,9 +113,64 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     const fullPath = `${projectPath}/${filePath}`
     window.dispatchEvent(
       new CustomEvent('editor:open-file', {
-        detail: { path: fullPath, preview: false }
+        detail: { path: fullPath, preview: false, projectPath, relativePath: filePath }
       })
     )
+    // Switch to editor panel
+    window.dispatchEvent(
+      new CustomEvent('panel:focus', { detail: { panelId: 'editor' } })
+    )
+  }
+
+  const handleOpenChangedFile = (file: GitChangedFile) => {
+    // For renamed files, extract the new name
+    let filePath = file.file
+    if (file.status === 'renamed' && file.file.includes(' → ')) {
+      filePath = file.file.split(' → ')[1]
+    }
+
+    // Dispatch event to open file in editor with diff mode
+    const fullPath = `${projectPath}/${filePath}`
+    window.dispatchEvent(
+      new CustomEvent('editor:open-file', {
+        detail: { path: fullPath, preview: false, showDiff: true, projectPath, relativePath: filePath }
+      })
+    )
+    // Switch to editor panel
+    window.dispatchEvent(
+      new CustomEvent('panel:focus', { detail: { panelId: 'editor' } })
+    )
+  }
+
+  const getStatusIcon = (status: GitChangedFile['status']) => {
+    switch (status) {
+      case 'modified':
+        return <span className="text-yellow-400 font-bold text-xs">M</span>
+      case 'staged':
+        return <span className="text-green-400 font-bold text-xs">S</span>
+      case 'untracked':
+        return <span className="text-gray-400 font-bold text-xs">U</span>
+      case 'deleted':
+        return <span className="text-red-400 font-bold text-xs">D</span>
+      case 'renamed':
+        return <span className="text-blue-400 font-bold text-xs">R</span>
+      case 'conflicted':
+        return <span className="text-orange-400 font-bold text-xs">!</span>
+      default:
+        return null
+    }
+  }
+
+  const getStatusColor = (status: GitChangedFile['status']) => {
+    switch (status) {
+      case 'modified': return 'text-yellow-400'
+      case 'staged': return 'text-green-400'
+      case 'untracked': return 'text-gray-400'
+      case 'deleted': return 'text-red-400'
+      case 'renamed': return 'text-blue-400'
+      case 'conflicted': return 'text-orange-400'
+      default: return ''
+    }
   }
 
   if (!status?.isRepo) {
@@ -170,6 +232,41 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
       </div>
 
       <div className="flex-1 overflow-auto">
+        {/* Changed Files Section */}
+        {changedFiles.length > 0 && (
+          <div className="border-b border-dark-border">
+            <div className="px-4 py-2 bg-dark-hover text-sm font-medium">
+              Changes ({changedFiles.length})
+            </div>
+            <div className="max-h-48 overflow-auto">
+              {changedFiles.map((file, index) => (
+                <div
+                  key={`${file.file}-${index}`}
+                  className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
+                  onClick={() => handleOpenChangedFile(file)}
+                  title={`${file.status}${file.staged ? ' (staged)' : ''}: ${file.file}`}
+                >
+                  <span className="w-4 flex-shrink-0 flex items-center justify-center">
+                    {getStatusIcon(file.status)}
+                  </span>
+                  <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
+                    {file.file}
+                  </span>
+                  <svg
+                    className="w-4 h-4 text-dark-muted opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Branches Section */}
         <div className="border-b border-dark-border">
           <div className="flex items-center justify-between px-4 py-2 bg-dark-hover">

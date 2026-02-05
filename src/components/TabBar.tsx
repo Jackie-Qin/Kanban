@@ -22,6 +22,7 @@ import { Project } from '../types'
 interface TabBarProps {
   onAddProject: () => void
   onOpenSettings: () => void
+  onOpenSearch: () => void
 }
 
 function SortableTab({
@@ -62,7 +63,7 @@ function SortableTab({
   )
 }
 
-export default function TabBar({ onAddProject, onOpenSettings }: TabBarProps) {
+export default function TabBar({ onAddProject, onOpenSettings, onOpenSearch }: TabBarProps) {
   const { projects, activeProjectId, closedProjectIds, setActiveProject, reorderProjects, deleteProject, closeProject, reopenProject, updateProject } =
     useStore()
   const [contextMenu, setContextMenu] = useState<{
@@ -146,7 +147,11 @@ export default function TabBar({ onAddProject, onOpenSettings }: TabBarProps) {
 
   return (
     <>
-      <div className="flex items-center px-4 border-b border-dark-border bg-dark-bg">
+      {/* Combined title bar + tab bar - draggable region with traffic light padding */}
+      <div className="flex items-center h-10 px-4 border-b border-dark-border bg-dark-bg app-drag-region">
+        {/* Left padding for macOS traffic lights (window controls) */}
+        <div className="w-16 flex-shrink-0" />
+
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -235,6 +240,27 @@ export default function TabBar({ onAddProject, onOpenSettings }: TabBarProps) {
         )}
 
         <div className="flex-1" />
+
+        {/* Search button */}
+        <button
+          onClick={onOpenSearch}
+          className="p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors no-drag mr-1"
+          title="Search (Cmd+P)"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+        </button>
 
         <button
           onClick={onOpenSettings}

@@ -429,6 +429,12 @@ interface GitDiffFile {
   binary: boolean
 }
 
+interface GitChangedFile {
+  file: string
+  status: 'modified' | 'staged' | 'untracked' | 'deleted' | 'renamed' | 'conflicted'
+  staged: boolean
+}
+
 function getGit(projectPath: string): SimpleGit {
   return simpleGit(projectPath)
 }
@@ -475,9 +481,71 @@ ipcMain.handle('git-status', async (_event, projectPath: string): Promise<GitSta
   }
 })
 
+ipcMain.handle('git-changed-files', async (_event, projectPath: string): Promise<GitChangedFile[]> => {
+  try {
+    const git = getGit(projectPath)
+    const isRepo = await git.checkIsRepo()
+
+    if (!isRepo) {
+      return []
+    }
+
+    const status: StatusResult = await git.status()
+    const files: GitChangedFile[] = []
+
+    // Staged files
+    for (const file of status.staged) {
+      files.push({ file, status: 'staged', staged: true })
+    }
+
+    // Modified files (unstaged)
+    for (const file of status.modified) {
+      // Skip if already in staged
+      if (!files.some(f => f.file === file)) {
+        files.push({ file, status: 'modified', staged: false })
+      }
+    }
+
+    // Deleted files
+    for (const file of status.deleted) {
+      if (!files.some(f => f.file === file)) {
+        files.push({ file, status: 'deleted', staged: false })
+      }
+    }
+
+    // Untracked files
+    for (const file of status.not_added) {
+      files.push({ file, status: 'untracked', staged: false })
+    }
+
+    // Renamed files
+    for (const rename of status.renamed) {
+      files.push({ file: `${rename.from} → ${rename.to}`, status: 'renamed', staged: true })
+    }
+
+    // Conflicted files
+    for (const file of status.conflicted) {
+      files.push({ file, status: 'conflicted', staged: false })
+    }
+
+    return files
+  } catch (error) {
+    console.error('Git changed files error:', error)
+    return []
+  }
+})
+
 ipcMain.handle('git-branches', async (_event, projectPath: string): Promise<GitBranch[]> => {
   try {
     const git = getGit(projectPath)
+
+    // Prune stale remote-tracking branches before listing
+    try {
+      await git.fetch(['--prune'])
+    } catch {
+      // Ignore prune errors (might not have remote)
+    }
+
     const branchSummary = await git.branchLocal()
 
     return branchSummary.all.map((name) => ({
@@ -567,6 +635,17 @@ ipcMain.handle('git-diff', async (_event, projectPath: string, file: string, has
   }
 })
 
+ipcMain.handle('git-show-file', async (_event, projectPath: string, file: string, ref = 'HEAD'): Promise<string | null> => {
+  try {
+    const git = getGit(projectPath)
+    const content = await git.show([`${ref}:${file}`])
+    return content
+  } catch (error) {
+    console.error('Git show file error:', error)
+    return null
+  }
+})
+
 ipcMain.handle('git-checkout', async (_event, projectPath: string, branch: string): Promise<boolean> => {
   try {
     const git = getGit(projectPath)
@@ -596,10 +675,192 @@ ipcMain.handle('git-create-branch', async (_event, projectPath: string, branchNa
 ipcMain.handle('git-delete-branch', async (_event, projectPath: string, branchName: string): Promise<boolean> => {
   try {
     const git = getGit(projectPath)
-    await git.deleteLocalBranch(branchName)
+    // Use force delete to handle unmerged branches
+    await git.deleteLocalBranch(branchName, true)
     return true
   } catch (error) {
     console.error('Git delete branch error:', error)
     return false
+  }
+})
+
+// Search Handlers
+interface SearchFileResult {
+  path: string
+  name: string
+  relativePath: string
+}
+
+interface SearchTextResult {
+  path: string
+  relativePath: string
+  line: number
+  content: string
+}
+
+// Directories and files to ignore during search
+const IGNORE_PATTERNS = [
+  'node_modules',
+  '.git',
+  '.next',
+  'dist',
+  'build',
+  '.cache',
+  '.turbo',
+  'coverage',
+  '.DS_Store',
+  '*.log',
+  '*.lock'
+]
+
+function shouldIgnore(name: string): boolean {
+  for (const pattern of IGNORE_PATTERNS) {
+    if (pattern.startsWith('*')) {
+      // Wildcard pattern (e.g., *.log)
+      const ext = pattern.slice(1)
+      if (name.endsWith(ext)) return true
+    } else if (name === pattern) {
+      return true
+    }
+  }
+  return false
+}
+
+// Recursively get all files in a directory
+async function getAllFiles(dirPath: string, basePath: string, files: SearchFileResult[] = []): Promise<SearchFileResult[]> {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+
+    for (const entry of entries) {
+      if (shouldIgnore(entry.name)) continue
+
+      const fullPath = path.join(dirPath, entry.name)
+      const relativePath = path.relative(basePath, fullPath)
+
+      if (entry.isDirectory()) {
+        await getAllFiles(fullPath, basePath, files)
+      } else {
+        files.push({
+          path: fullPath,
+          name: entry.name,
+          relativePath
+        })
+      }
+    }
+  } catch {
+    // Skip directories we can't read
+  }
+
+  return files
+}
+
+// Simple fuzzy match scoring
+function fuzzyScore(query: string, text: string): number {
+  const queryLower = query.toLowerCase()
+  const textLower = text.toLowerCase()
+
+  // Exact match gets highest score
+  if (textLower === queryLower) return 1000
+
+  // Contains query as substring
+  if (textLower.includes(queryLower)) {
+    // Bonus for match at start
+    if (textLower.startsWith(queryLower)) return 500
+    return 300
+  }
+
+  // Character-by-character fuzzy match
+  let score = 0
+  let queryIdx = 0
+  let prevMatchIdx = -1
+
+  for (let i = 0; i < textLower.length && queryIdx < queryLower.length; i++) {
+    if (textLower[i] === queryLower[queryIdx]) {
+      // Consecutive matches get bonus
+      if (prevMatchIdx === i - 1) {
+        score += 10
+      } else {
+        score += 5
+      }
+      prevMatchIdx = i
+      queryIdx++
+    }
+  }
+
+  // Only return score if all query characters were matched
+  return queryIdx === queryLower.length ? score : 0
+}
+
+ipcMain.handle('search-files', async (_event, projectPath: string, query: string): Promise<SearchFileResult[]> => {
+  try {
+    if (!query.trim()) return []
+
+    const allFiles = await getAllFiles(projectPath, projectPath)
+
+    // Score and filter files
+    const scored = allFiles
+      .map(file => ({
+        ...file,
+        score: Math.max(
+          fuzzyScore(query, file.name),
+          fuzzyScore(query, file.relativePath) * 0.8 // Path match weighted slightly lower
+        )
+      }))
+      .filter(file => file.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 50) // Limit results
+
+    return scored.map(({ path: p, name, relativePath }) => ({ path: p, name, relativePath }))
+  } catch (error) {
+    console.error('Search files error:', error)
+    return []
+  }
+})
+
+ipcMain.handle('search-text', async (_event, projectPath: string, query: string): Promise<SearchTextResult[]> => {
+  try {
+    if (!query.trim()) return []
+
+    const results: SearchTextResult[] = []
+    const allFiles = await getAllFiles(projectPath, projectPath)
+    const queryLower = query.toLowerCase()
+
+    // Binary file extensions to skip
+    const binaryExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.tar', '.gz', '.dmg', '.exe', '.bin', '.woff', '.woff2', '.ttf', '.eot']
+
+    for (const file of allFiles) {
+      // Skip binary files
+      const ext = path.extname(file.name).toLowerCase()
+      if (binaryExtensions.includes(ext)) continue
+
+      try {
+        const content = fs.readFileSync(file.path, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().includes(queryLower)) {
+            results.push({
+              path: file.path,
+              relativePath: file.relativePath,
+              line: i + 1,
+              content: lines[i].trim().slice(0, 200) // Limit line length
+            })
+
+            // Limit results per file
+            if (results.filter(r => r.path === file.path).length >= 5) break
+          }
+        }
+
+        // Limit total results
+        if (results.length >= 100) break
+      } catch {
+        // Skip files we can't read
+      }
+    }
+
+    return results
+  } catch (error) {
+    console.error('Search text error:', error)
+    return []
   }
 })

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { IDockviewPanelProps } from 'dockview'
-import Editor, { OnMount } from '@monaco-editor/react'
+import Editor, { DiffEditor, OnMount } from '@monaco-editor/react'
 import { electron } from '../../lib/electron'
 import FileIcon from '../FileIcon'
 
@@ -16,6 +16,8 @@ interface OpenFile {
   originalContent: string
   isPreview: boolean
   isModified: boolean
+  showDiff: boolean
+  gitOriginal?: string // Content from git HEAD for diff view
 }
 
 // Get language from file extension
@@ -109,6 +111,7 @@ function getLanguage(filename: string): string {
 export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParams>) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
+  const [diffViewMode, setDiffViewMode] = useState<'inline' | 'split'>('split')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,30 +119,66 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath)
 
-  // Listen for file open requests from Directory panel
+  // Listen for file open requests from Directory panel and Search modal
   useEffect(() => {
     const handleOpenFile = (e: Event) => {
-      const customEvent = e as CustomEvent<{ path: string; preview: boolean }>
-      const { path, preview } = customEvent.detail
-      openFile(path, preview)
+      const customEvent = e as CustomEvent<{
+        path?: string
+        filePath?: string
+        preview?: boolean
+        showDiff?: boolean
+        projectPath?: string
+        relativePath?: string
+        line?: number
+      }>
+      const { path, filePath, preview = false, showDiff, projectPath, relativePath, line } = customEvent.detail
+      const targetPath = path || filePath
+      if (targetPath) {
+        openFile(targetPath, preview, showDiff, projectPath, relativePath, line)
+      }
     }
 
     window.addEventListener('editor:open-file', handleOpenFile)
     return () => window.removeEventListener('editor:open-file', handleOpenFile)
   }, [openFiles])
 
+  // Jump to a specific line in the editor
+  const jumpToLine = useCallback((lineNumber: number) => {
+    if (editorRef.current && monacoRef.current) {
+      setTimeout(() => {
+        editorRef.current.revealLineInCenter(lineNumber)
+        editorRef.current.setPosition({ lineNumber, column: 1 })
+        editorRef.current.focus()
+      }, 100)
+    }
+  }, [])
+
   const openFile = useCallback(
-    async (filePath: string, isPreview: boolean) => {
+    async (filePath: string, isPreview: boolean, showDiff = false, gitProjectPath?: string, gitRelativePath?: string, lineNumber?: number) => {
       // Check if file is already open
       const existingIndex = openFiles.findIndex((f) => f.path === filePath)
       if (existingIndex !== -1) {
         // If already open, just make it active
         setActiveFilePath(filePath)
         // If opening permanently, convert from preview
-        if (!isPreview) {
+        // Also update showDiff state if needed
+        const existingFile = openFiles[existingIndex]
+
+        // If toggling diff mode, fetch git original if needed
+        if (showDiff && !existingFile.gitOriginal && gitProjectPath && gitRelativePath) {
+          const gitOriginal = await electron.gitShowFile(gitProjectPath, gitRelativePath)
           setOpenFiles((prev) =>
-            prev.map((f) => (f.path === filePath ? { ...f, isPreview: false } : f))
+            prev.map((f) => (f.path === filePath ? { ...f, isPreview: isPreview ? f.isPreview : false, showDiff, gitOriginal: gitOriginal || f.content } : f))
           )
+        } else {
+          setOpenFiles((prev) =>
+            prev.map((f) => (f.path === filePath ? { ...f, isPreview: isPreview ? f.isPreview : false, showDiff } : f))
+          )
+        }
+
+        // Jump to line if specified
+        if (lineNumber) {
+          jumpToLine(lineNumber)
         }
         return
       }
@@ -153,13 +192,28 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
 
       const name = filePath.split('/').pop() || filePath
 
+      // If showing diff, get the original from git HEAD
+      let gitOriginal: string | undefined
+      if (showDiff && gitProjectPath && gitRelativePath) {
+        try {
+          // Get the file content from HEAD
+          const result = await electron.gitShowFile(gitProjectPath, gitRelativePath)
+          gitOriginal = result || content // Fall back to current content if file is new
+        } catch (e) {
+          console.error('Failed to get git original:', e)
+          gitOriginal = content
+        }
+      }
+
       const newFile: OpenFile = {
         path: filePath,
         name,
         content,
         originalContent: content,
         isPreview,
-        isModified: false
+        isModified: false,
+        showDiff,
+        gitOriginal
       }
 
       setOpenFiles((prev) => {
@@ -175,8 +229,13 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
         return [...prev, newFile]
       })
       setActiveFilePath(filePath)
+
+      // Jump to line if specified
+      if (lineNumber) {
+        jumpToLine(lineNumber)
+      }
     },
-    [openFiles]
+    [openFiles, jumpToLine]
   )
 
   const closeFile = useCallback(
@@ -294,7 +353,7 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
 
   // Expose openFile method globally for Directory panel
   useEffect(() => {
-    (window as unknown as { editorOpenFile: typeof openFile }).editorOpenFile = openFile
+    (window as unknown as { editorOpenFile: (filePath: string, isPreview: boolean, showDiff?: boolean, gitProjectPath?: string, gitRelativePath?: string) => Promise<void> }).editorOpenFile = openFile
   }, [openFile])
 
   return (
@@ -302,6 +361,41 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
       {/* Tab bar */}
       {openFiles.length > 0 && (
         <div className="flex items-center border-b border-dark-border bg-dark-card overflow-x-auto hide-scrollbar">
+          {/* Diff view mode toggle - segmented control */}
+          {activeFile?.showDiff && (
+            <div className="flex items-center px-2 border-r border-dark-border">
+              <div className="flex items-center bg-dark-bg rounded overflow-hidden">
+                <button
+                  onClick={() => setDiffViewMode('split')}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                    diffViewMode === 'split'
+                      ? 'bg-dark-hover text-dark-text'
+                      : 'text-dark-muted hover:text-dark-text'
+                  }`}
+                  title="Side-by-side view"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
+                  </svg>
+                  <span>Split</span>
+                </button>
+                <button
+                  onClick={() => setDiffViewMode('inline')}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                    diffViewMode === 'inline'
+                      ? 'bg-dark-hover text-dark-text'
+                      : 'text-dark-muted hover:text-dark-text'
+                  }`}
+                  title="Unified view"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                  <span>Inline</span>
+                </button>
+              </div>
+            </div>
+          )}
           {openFiles.map((file) => (
             <div
               key={file.path}
@@ -316,6 +410,9 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
               <span className={file.isPreview ? 'italic' : ''}>
                 {file.name}
               </span>
+              {file.showDiff && (
+                <span className="text-xs px-1 py-0.5 bg-blue-600 rounded text-white">diff</span>
+              )}
               {file.isModified ? (
                 <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
               ) : (
@@ -349,42 +446,83 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
       {/* Editor area */}
       <div className="flex-1 min-h-0">
         {activeFile ? (
-          <Editor
-            height="100%"
-            language={getLanguage(activeFile.name)}
-            value={activeFile.content}
-            onChange={handleEditorChange}
-            onMount={handleEditorMount}
-            options={{
-              fontSize: 13,
-              fontFamily: 'Menlo, Monaco, "SF Mono", "Fira Code", Consolas, monospace',
-              minimap: {
-                enabled: true,
-                maxColumn: 80,
-                renderCharacters: false,
-                showSlider: 'always',
-                side: 'right',
-                scale: 1
-              },
-              scrollBeyondLastLine: false,
-              lineNumbers: 'on',
-              renderLineHighlight: 'line',
-              tabSize: 2,
-              insertSpaces: true,
-              wordWrap: 'off',
-              automaticLayout: true,
-              padding: { top: 8, bottom: 8 },
-              smoothScrolling: true,
-              cursorBlinking: 'smooth',
-              cursorSmoothCaretAnimation: 'on',
-              bracketPairColorization: { enabled: true },
-              guides: {
-                bracketPairs: true,
-                indentation: true
-              }
-            }}
-            theme="vs-dark"
-          />
+          activeFile.showDiff && activeFile.gitOriginal !== undefined ? (
+            <div className={`h-full ${diffViewMode === 'inline' ? 'diff-inline-mode' : ''}`}>
+              <style>{`
+                /* Hide diff overview minimap in inline mode */
+                .diff-inline-mode .monaco-diff-editor .diffOverview {
+                  display: none !important;
+                }
+              `}</style>
+              <DiffEditor
+                height="100%"
+                language={getLanguage(activeFile.name)}
+                original={activeFile.gitOriginal}
+                modified={activeFile.content}
+                onMount={(_editor, monaco) => {
+                  monacoRef.current = monaco
+                  monaco.editor.defineTheme('kanban-dark', {
+                    base: 'vs-dark',
+                    inherit: true,
+                    rules: [],
+                    colors: {
+                      'editor.background': '#1a1a1a',
+                      'diffEditor.insertedTextBackground': '#22c55e20',
+                      'diffEditor.removedTextBackground': '#ef444420'
+                    }
+                  })
+                  monaco.editor.setTheme('kanban-dark')
+                }}
+                options={{
+                  fontSize: 13,
+                  fontFamily: 'Menlo, Monaco, "SF Mono", "Fira Code", Consolas, monospace',
+                  readOnly: true,
+                  renderSideBySide: diffViewMode === 'split',
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  padding: { top: 8, bottom: 8 }
+                }}
+                theme="vs-dark"
+              />
+            </div>
+          ) : (
+            <Editor
+              height="100%"
+              language={getLanguage(activeFile.name)}
+              value={activeFile.content}
+              onChange={handleEditorChange}
+              onMount={handleEditorMount}
+              options={{
+                fontSize: 13,
+                fontFamily: 'Menlo, Monaco, "SF Mono", "Fira Code", Consolas, monospace',
+                minimap: {
+                  enabled: true,
+                  maxColumn: 80,
+                  renderCharacters: false,
+                  showSlider: 'always',
+                  side: 'right',
+                  scale: 1
+                },
+                scrollBeyondLastLine: false,
+                lineNumbers: 'on',
+                renderLineHighlight: 'line',
+                tabSize: 2,
+                insertSpaces: true,
+                wordWrap: 'off',
+                automaticLayout: true,
+                padding: { top: 8, bottom: 8 },
+                smoothScrolling: true,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                bracketPairColorization: { enabled: true },
+                guides: {
+                  bracketPairs: true,
+                  indentation: true
+                }
+              }}
+              theme="vs-dark"
+            />
+          )
         ) : (
           <div className="h-full flex items-center justify-center text-dark-muted">
             <div className="text-center">

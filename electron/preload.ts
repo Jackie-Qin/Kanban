@@ -42,6 +42,12 @@ interface GitDiffFile {
   binary: boolean
 }
 
+interface GitChangedFile {
+  file: string
+  status: 'modified' | 'staged' | 'untracked' | 'deleted' | 'renamed' | 'conflicted'
+  staged: boolean
+}
+
 interface UpdateStatus {
   status: 'checking' | 'available' | 'not-available'
   version?: string
@@ -97,6 +103,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Git methods
   gitStatus: (projectPath: string): Promise<GitStatus> =>
     ipcRenderer.invoke('git-status', projectPath),
+  gitChangedFiles: (projectPath: string): Promise<GitChangedFile[]> =>
+    ipcRenderer.invoke('git-changed-files', projectPath),
   gitBranches: (projectPath: string): Promise<GitBranch[]> =>
     ipcRenderer.invoke('git-branches', projectPath),
   gitLog: (projectPath: string, branch?: string, limit?: number): Promise<GitCommit[]> =>
@@ -105,6 +113,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git-commit-details', projectPath, hash),
   gitDiff: (projectPath: string, file: string, hash?: string): Promise<string> =>
     ipcRenderer.invoke('git-diff', projectPath, file, hash),
+  gitShowFile: (projectPath: string, file: string, ref?: string): Promise<string | null> =>
+    ipcRenderer.invoke('git-show-file', projectPath, file, ref),
   gitCheckout: (projectPath: string, branch: string): Promise<boolean> =>
     ipcRenderer.invoke('git-checkout', projectPath, branch),
   gitCreateBranch: (projectPath: string, branchName: string, baseBranch?: string): Promise<boolean> =>
@@ -124,5 +134,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Shell methods
-  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url)
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
+
+  // Search methods
+  searchFiles: (projectPath: string, query: string): Promise<{ path: string; name: string; relativePath: string }[]> =>
+    ipcRenderer.invoke('search-files', projectPath, query),
+  searchText: (projectPath: string, query: string): Promise<{ path: string; relativePath: string; line: number; content: string }[]> =>
+    ipcRenderer.invoke('search-text', projectPath, query)
 })
