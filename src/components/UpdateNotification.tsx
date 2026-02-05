@@ -25,7 +25,7 @@ export default function UpdateNotification() {
 
   if (updateStatus.status === 'available') {
     return (
-      <div className="fixed bottom-4 right-4 bg-dark-surface border border-dark-border rounded-lg shadow-lg p-4 max-w-sm z-50">
+      <div className="fixed bottom-4 right-4 bg-[#1e1e1e] border border-dark-border rounded-lg shadow-lg p-4 max-w-sm z-50">
         <div className="flex items-start gap-3">
           <div className="text-blue-400 mt-0.5">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -59,7 +59,7 @@ export default function UpdateNotification() {
 
   if (updateStatus.status === 'downloading') {
     return (
-      <div className="fixed bottom-4 right-4 bg-dark-surface border border-dark-border rounded-lg shadow-lg p-4 max-w-sm z-50">
+      <div className="fixed bottom-4 right-4 bg-[#1e1e1e] border border-dark-border rounded-lg shadow-lg p-4 max-w-sm z-50">
         <div className="flex items-center gap-3">
           <div className="text-blue-400 animate-pulse">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -85,7 +85,7 @@ export default function UpdateNotification() {
 
   if (updateStatus.status === 'downloaded') {
     return (
-      <div className="fixed bottom-4 right-4 bg-dark-surface border border-dark-border rounded-lg shadow-lg p-4 max-w-sm z-50">
+      <div className="fixed bottom-4 right-4 bg-[#1e1e1e] border border-dark-border rounded-lg shadow-lg p-4 max-w-sm z-50">
         <div className="flex items-start gap-3">
           <div className="text-green-400 mt-0.5">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -119,16 +119,16 @@ export default function UpdateNotification() {
 
   if (updateStatus.status === 'error') {
     return (
-      <div className="fixed bottom-4 right-4 bg-dark-surface border border-red-500/50 rounded-lg shadow-lg p-4 max-w-sm z-50">
+      <div className="fixed bottom-4 right-4 bg-[#1e1e1e] border border-red-500/50 rounded-lg shadow-lg p-4 max-w-sm z-50">
         <div className="flex items-start gap-3">
-          <div className="text-red-400 mt-0.5">
+          <div className="text-red-400 mt-0.5 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <h4 className="text-dark-text font-medium">Update Error</h4>
-            <p className="text-dark-muted text-sm mt-1">
+            <p className="text-dark-muted text-sm mt-1 break-words">
               {updateStatus.message || 'Failed to check for updates'}
             </p>
             <button

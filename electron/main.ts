@@ -70,6 +70,8 @@ function createWindow() {
 function setupAutoUpdater() {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
+  // Allow updates without code signing (for personal/unsigned apps)
+  autoUpdater.forceDevUpdateConfig = true
 
   autoUpdater.on('checking-for-update', () => {
     mainWindow?.webContents.send('update-status', { status: 'checking' })
