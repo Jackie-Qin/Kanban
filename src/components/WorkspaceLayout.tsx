@@ -30,6 +30,51 @@ const components: Record<string, React.FC<any>> = {
   directory: DirectoryPanel
 }
 
+// Watermark component shown in empty dockview groups
+const Watermark: React.FC = () => {
+  return (
+    <div className="h-full w-full flex items-center justify-center bg-dark-bg">
+      <p className="text-dark-muted text-sm opacity-50">Drop a panel here</p>
+    </div>
+  )
+}
+
+// Panel icon SVGs
+const PANEL_ICONS: Record<string, React.ReactNode> = {
+  kanban: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="5" height="18" rx="1" />
+      <rect x="10" y="3" width="5" height="12" rx="1" />
+      <rect x="17" y="3" width="5" height="15" rx="1" />
+    </svg>
+  ),
+  editor: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  ),
+  terminal: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  ),
+  git: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  ),
+  directory: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
 const PANEL_OPTIONS = [
   { id: 'kanban', component: 'kanban', title: 'Kanban' },
   { id: 'editor', component: 'editor', title: 'Editor' },
@@ -108,15 +153,16 @@ export default function WorkspaceLayout({
   // Create default layout (extracted to be callable separately)
   const createDefaultLayoutForApi = useCallback(
     (api: DockviewApi) => {
-      // Add directory panel on the left
+      // Add directory panel on the left (narrow sidebar)
       api.addPanel({
         id: 'directory',
         component: 'directory',
         title: 'Directory',
-        params: { projectId, projectPath }
+        params: { projectId, projectPath },
+        initialWidth: 250
       })
 
-      // Add git panel (grouped with directory)
+      // Add git panel (grouped with directory as tabs)
       api.addPanel({
         id: 'git',
         component: 'git',
@@ -125,7 +171,7 @@ export default function WorkspaceLayout({
         position: { referencePanel: 'directory', direction: 'within' }
       })
 
-      // Add kanban panel in the center
+      // Add kanban panel in the center (takes remaining width)
       api.addPanel({
         id: 'kanban',
         component: 'kanban',
@@ -134,7 +180,7 @@ export default function WorkspaceLayout({
         position: { referencePanel: 'directory', direction: 'right' }
       })
 
-      // Add editor panel (grouped with kanban)
+      // Add editor panel (grouped with kanban as tabs)
       api.addPanel({
         id: 'editor',
         component: 'editor',
@@ -143,13 +189,14 @@ export default function WorkspaceLayout({
         position: { referencePanel: 'kanban', direction: 'within' }
       })
 
-      // Add terminal panel at the bottom
+      // Add terminal panel below kanban/editor area
       api.addPanel({
         id: 'terminal',
         component: 'terminal',
         title: 'Terminal',
         params: { projectId, projectPath },
-        position: { referencePanel: 'kanban', direction: 'below' }
+        position: { referencePanel: 'kanban', direction: 'below' },
+        initialHeight: 220
       })
 
       // Activate kanban panel by default after a short delay
@@ -301,13 +348,45 @@ export default function WorkspaceLayout({
     <div className="h-full w-full relative" onContextMenu={handleContextMenu}>
       <DockviewReact
         components={components}
+        watermarkComponent={Watermark}
         onReady={onReady}
         className="dockview-theme-dark"
       />
 
-      {/* Empty state overlay */}
+      {/* Side toolbar for closed panels */}
+      {closedPanels.length > 0 && (
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-1 p-1.5 bg-dark-card/90 backdrop-blur-sm border border-dark-border rounded-lg z-10 shadow-lg">
+          {closedPanels.map((panel) => (
+            <button
+              key={panel.id}
+              onClick={() => handleAddPanel(panel.id)}
+              className="p-2 hover:bg-dark-hover rounded-md text-dark-muted hover:text-dark-text transition-colors"
+              title={panel.title}
+            >
+              {PANEL_ICONS[panel.id]}
+            </button>
+          ))}
+          {closedPanels.length >= 3 && (
+            <>
+              <div className="border-t border-dark-border my-0.5" />
+              <button
+                onClick={handleResetLayout}
+                className="p-2 hover:bg-dark-hover rounded-md text-blue-400 hover:text-blue-300 transition-colors"
+                title="Reset Layout"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 1 1 9 9" />
+                  <polyline points="3 7 3 12 8 12" />
+                </svg>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Empty state overlay when all panels are closed */}
       {isEmpty && (
-        <div className="absolute inset-0 flex items-center justify-center bg-dark-bg">
+        <div className="absolute inset-0 flex items-center justify-center bg-dark-bg pointer-events-none">
           <div className="text-center">
             <svg
               className="w-16 h-16 mx-auto mb-4 text-dark-muted opacity-50"
@@ -322,14 +401,8 @@ export default function WorkspaceLayout({
                 d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
               />
             </svg>
-            <p className="text-dark-muted mb-4">All panels closed</p>
-            <p className="text-dark-muted text-sm mb-4">Right-click to open panels</p>
-            <button
-              onClick={handleResetLayout}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-            >
-              Reset Layout
-            </button>
+            <p className="text-dark-muted mb-2">All panels closed</p>
+            <p className="text-dark-muted text-sm">Use the buttons on the right to reopen panels</p>
           </div>
         </div>
       )}

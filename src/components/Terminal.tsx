@@ -22,6 +22,7 @@ export default function Terminal({
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
   const ptyCreatedRef = useRef(false)
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
@@ -78,9 +79,11 @@ export default function Terminal({
     try {
       const webglAddon = new WebglAddon()
       webglAddon.onContextLoss(() => {
-        webglAddon.dispose()
+        try { webglAddon.dispose() } catch { /* already disposed */ }
+        webglAddonRef.current = null
       })
       xterm.loadAddon(webglAddon)
+      webglAddonRef.current = webglAddon
     } catch {
       // Falls back to canvas renderer if WebGL unavailable
     }
@@ -145,7 +148,13 @@ export default function Terminal({
         ptyCreatedRef.current = false
       }
 
-      xterm.dispose()
+      // Dispose WebGL addon first to avoid _isDisposed errors during xterm teardown
+      if (webglAddonRef.current) {
+        try { webglAddonRef.current.dispose() } catch { /* already disposed */ }
+        webglAddonRef.current = null
+      }
+
+      try { xterm.dispose() } catch { /* xterm already disposed */ }
       xtermRef.current = null
       fitAddonRef.current = null
     }

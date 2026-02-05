@@ -161,3 +161,8 @@ button:focus {
 .dockview-theme-dark .dv-content-container {
   background-color: #1a1a1a;
 }
+
+/* Watermark shown in empty groups */
+.dockview-theme-dark .dv-watermark {
+  background-color: #1a1a1a;
+}
