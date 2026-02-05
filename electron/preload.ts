@@ -121,6 +121,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git-create-branch', projectPath, branchName, baseBranch),
   gitDeleteBranch: (projectPath: string, branchName: string): Promise<boolean> =>
     ipcRenderer.invoke('git-delete-branch', projectPath, branchName),
+  gitStage: (projectPath: string, files: string[]): Promise<boolean> =>
+    ipcRenderer.invoke('git-stage', projectPath, files),
+  gitUnstage: (projectPath: string, files: string[]): Promise<boolean> =>
+    ipcRenderer.invoke('git-unstage', projectPath, files),
+  gitDiscard: (projectPath: string, files: string[]): Promise<boolean> =>
+    ipcRenderer.invoke('git-discard', projectPath, files),
+  gitCommit: (projectPath: string, message: string): Promise<boolean> =>
+    ipcRenderer.invoke('git-commit', projectPath, message),
+  gitPush: (projectPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('git-push', projectPath),
+  gitPull: (projectPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('git-pull', projectPath),
 
   // Update methods
   updateCheck: () => ipcRenderer.invoke('update-check'),

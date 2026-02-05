@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import { electron, GitStatus, GitBranch, GitCommit, GitDiffFile, GitChangedFile } from '../../lib/electron'
 
@@ -30,10 +30,22 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   const [branches, setBranches] = useState<GitBranch[]>([])
   const [commits, setCommits] = useState<GitCommit[]>([])
   const [selectedCommit, setSelectedCommit] = useState<(GitCommit & { files: GitDiffFile[] }) | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [showBranchDropdown, setShowBranchDropdown] = useState(false)
   const [isCreatingBranch, setIsCreatingBranch] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
-  const [baseBranch, setBaseBranch] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
+  const [commitMessage, setCommitMessage] = useState('')
+  const [isPushing, setIsPushing] = useState(false)
+  const [isPulling, setIsPulling] = useState(false)
+  const [isCommitting, setIsCommitting] = useState(false)
+
+  // Resizable sections
+  const [changesHeight, setChangesHeight] = useState(200)
+  const [isDragging, setIsDragging] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const stagedFiles = changedFiles.filter(f => f.staged)
+  const unstagedFiles = changedFiles.filter(f => !f.staged)
 
   const fetchData = useCallback(async () => {
     if (!projectPath) return
@@ -51,12 +63,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
       setChangedFiles(changedFilesResult)
       setBranches(branchesResult)
       setCommits(commitsResult)
-
-      // Set default base branch
-      if (branchesResult.length > 0) {
-        const current = branchesResult.find((b) => b.current)
-        setBaseBranch(current?.name || branchesResult[0].name)
-      }
     } catch (error) {
       console.error('Failed to fetch git data:', error)
     }
@@ -67,36 +73,87 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     fetchData()
   }, [fetchData])
 
+  // Handle resize
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const newHeight = e.clientY - rect.top - 100 // Account for header
+      setChangesHeight(Math.max(100, Math.min(newHeight, rect.height - 150)))
+    }
+
+    const handleMouseUp = () => setIsDragging(false)
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging])
+
   const handleCheckout = async (branchName: string) => {
     const success = await electron.gitCheckout(projectPath, branchName)
     if (success) {
+      setShowBranchDropdown(false)
       await fetchData()
     }
   }
 
   const handleCreateBranch = async () => {
     if (!newBranchName.trim()) return
-
-    const success = await electron.gitCreateBranch(projectPath, newBranchName.trim(), baseBranch)
+    const currentBranch = branches.find(b => b.current)?.name
+    const success = await electron.gitCreateBranch(projectPath, newBranchName.trim(), currentBranch)
     if (success) {
       setIsCreatingBranch(false)
       setNewBranchName('')
+      setShowBranchDropdown(false)
       await fetchData()
     }
   }
 
-  const handleDeleteBranch = async (branchName: string) => {
-    const confirmed = window.confirm(`Delete branch "${branchName}"?`)
-    if (!confirmed) return
+  const handleStage = async (files: string[]) => {
+    await electron.gitStage(projectPath, files)
+    await fetchData()
+  }
 
-    const success = await electron.gitDeleteBranch(projectPath, branchName)
+  const handleUnstage = async (files: string[]) => {
+    await electron.gitUnstage(projectPath, files)
+    await fetchData()
+  }
+
+  const handleDiscard = async (file: string) => {
+    if (!confirm(`Discard changes to ${file}?`)) return
+    await electron.gitDiscard(projectPath, [file])
+    await fetchData()
+  }
+
+  const handleCommit = async () => {
+    if (!commitMessage.trim() || stagedFiles.length === 0) return
+    setIsCommitting(true)
+    const success = await electron.gitCommit(projectPath, commitMessage.trim())
     if (success) {
-      await fetchData()
-    } else {
-      alert(`Failed to delete branch "${branchName}". It may not exist or is the current branch.`)
-      // Refresh anyway to update stale branches
+      setCommitMessage('')
       await fetchData()
     }
+    setIsCommitting(false)
+  }
+
+  const handlePush = async () => {
+    setIsPushing(true)
+    await electron.gitPush(projectPath)
+    await fetchData()
+    setIsPushing(false)
+  }
+
+  const handlePull = async () => {
+    setIsPulling(true)
+    await electron.gitPull(projectPath)
+    await fetchData()
+    setIsPulling(false)
   }
 
   const handleCommitClick = async (commit: GitCommit) => {
@@ -109,34 +166,28 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   }
 
   const handleOpenFile = (filePath: string) => {
-    // Dispatch event to open file in editor
     const fullPath = `${projectPath}/${filePath}`
     window.dispatchEvent(
       new CustomEvent('editor:open-file', {
         detail: { path: fullPath, preview: false, projectPath, relativePath: filePath }
       })
     )
-    // Switch to editor panel
     window.dispatchEvent(
       new CustomEvent('panel:focus', { detail: { panelId: 'editor' } })
     )
   }
 
   const handleOpenChangedFile = (file: GitChangedFile) => {
-    // For renamed files, extract the new name
     let filePath = file.file
     if (file.status === 'renamed' && file.file.includes(' → ')) {
       filePath = file.file.split(' → ')[1]
     }
-
-    // Dispatch event to open file in editor with diff mode
     const fullPath = `${projectPath}/${filePath}`
     window.dispatchEvent(
       new CustomEvent('editor:open-file', {
         detail: { path: fullPath, preview: false, showDiff: true, projectPath, relativePath: filePath }
       })
     )
-    // Switch to editor panel
     window.dispatchEvent(
       new CustomEvent('panel:focus', { detail: { panelId: 'editor' } })
     )
@@ -147,7 +198,7 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
       case 'modified':
         return <span className="text-yellow-400 font-bold text-xs">M</span>
       case 'staged':
-        return <span className="text-green-400 font-bold text-xs">S</span>
+        return <span className="text-green-400 font-bold text-xs">A</span>
       case 'untracked':
         return <span className="text-gray-400 font-bold text-xs">U</span>
       case 'deleted':
@@ -173,78 +224,185 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     }
   }
 
+  const getFileNameFromPath = (file: string) => {
+    if (file.includes(' → ')) {
+      return file.split(' → ')[1]
+    }
+    return file
+  }
+
   if (!status?.isRepo) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-dark-bg text-dark-muted">
         <div className="text-center">
-          <svg
-            className="w-16 h-16 mx-auto mb-4 opacity-50"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
+          <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
           <p className="text-lg font-medium">Not a Git Repository</p>
-          <p className="text-sm mt-1 opacity-75">
-            Initialize a repository to use Git features
-          </p>
+          <p className="text-sm mt-1 opacity-75">Initialize a repository to use Git features</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="h-full w-full flex flex-col bg-dark-bg text-dark-text overflow-hidden">
-      {/* Header */}
+    <div ref={containerRef} className="h-full w-full flex flex-col bg-dark-bg text-dark-text overflow-hidden">
+      {/* Header with branch dropdown */}
       <div className="px-4 py-3 border-b border-dark-border">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-            </svg>
-            <span className="font-semibold text-green-400">{status.branch}</span>
-          </div>
-          <button
-            onClick={fetchData}
-            disabled={isLoading}
-            className="p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors disabled:opacity-50"
-            title="Refresh"
-          >
-            <svg className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
-        </div>
+          <div className="relative">
+            <button
+              onClick={() => setShowBranchDropdown(!showBranchDropdown)}
+              className="flex items-center gap-2 hover:bg-dark-hover px-2 py-1 rounded transition-colors"
+            >
+              <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+              <span className="font-semibold text-green-400">{status.branch}</span>
+              <svg className={`w-4 h-4 text-dark-muted transition-transform ${showBranchDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
 
-        {/* Status summary */}
-        <div className="flex items-center gap-3 mt-2 text-sm text-dark-muted">
-          {status.ahead > 0 && <span className="text-blue-400">↑{status.ahead} ahead</span>}
-          {status.behind > 0 && <span className="text-orange-400">↓{status.behind} behind</span>}
-          {status.modified > 0 && <span className="text-yellow-400">●{status.modified} modified</span>}
-          {status.staged > 0 && <span className="text-green-400">●{status.staged} staged</span>}
+            {/* Branch dropdown */}
+            {showBranchDropdown && (
+              <div className="absolute top-full left-0 mt-1 w-64 bg-dark-card border border-dark-border rounded-lg shadow-xl z-50 overflow-hidden">
+                {/* Create branch input */}
+                {isCreatingBranch ? (
+                  <div className="p-2 border-b border-dark-border">
+                    <input
+                      type="text"
+                      value={newBranchName}
+                      onChange={(e) => setNewBranchName(e.target.value)}
+                      placeholder="New branch name..."
+                      className="w-full bg-dark-bg border border-dark-border rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleCreateBranch()
+                        if (e.key === 'Escape') {
+                          setIsCreatingBranch(false)
+                          setNewBranchName('')
+                        }
+                      }}
+                    />
+                    <div className="flex gap-1 mt-2">
+                      <button
+                        onClick={handleCreateBranch}
+                        disabled={!newBranchName.trim()}
+                        className="flex-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded"
+                      >
+                        Create
+                      </button>
+                      <button
+                        onClick={() => { setIsCreatingBranch(false); setNewBranchName('') }}
+                        className="px-2 py-1 text-xs text-dark-muted hover:text-dark-text"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsCreatingBranch(true)}
+                    className="w-full px-3 py-2 text-left text-sm text-blue-400 hover:bg-dark-hover border-b border-dark-border flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    New branch
+                  </button>
+                )}
+                <div className="max-h-48 overflow-auto">
+                  {branches.map((branch) => (
+                    <button
+                      key={branch.name}
+                      onClick={() => handleCheckout(branch.name)}
+                      disabled={branch.current}
+                      className={`w-full px-3 py-2 text-left text-sm hover:bg-dark-hover flex items-center gap-2 ${
+                        branch.current ? 'text-green-400 bg-dark-hover' : ''
+                      }`}
+                    >
+                      {branch.current && <span className="w-2 h-2 rounded-full bg-green-400" />}
+                      <span className={branch.current ? '' : 'ml-4'}>{branch.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            {/* Pull button */}
+            {status.behind > 0 && (
+              <button
+                onClick={handlePull}
+                disabled={isPulling}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-orange-400 hover:bg-dark-hover rounded transition-colors disabled:opacity-50"
+                title={`Pull ${status.behind} commits`}
+              >
+                <svg className={`w-4 h-4 ${isPulling ? 'animate-pulse' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+                {status.behind}
+              </button>
+            )}
+            {/* Push button */}
+            {status.ahead > 0 && (
+              <button
+                onClick={handlePush}
+                disabled={isPushing}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-blue-400 hover:bg-dark-hover rounded transition-colors disabled:opacity-50"
+                title={`Push ${status.ahead} commits`}
+              >
+                <svg className={`w-4 h-4 ${isPushing ? 'animate-pulse' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                </svg>
+                {status.ahead}
+              </button>
+            )}
+            {/* Refresh button */}
+            <button
+              onClick={fetchData}
+              disabled={isLoading}
+              className="p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors disabled:opacity-50"
+              title="Refresh"
+            >
+              <svg className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto">
-        {/* Changed Files Section */}
-        {changedFiles.length > 0 && (
+      {/* Close dropdown when clicking outside */}
+      {showBranchDropdown && (
+        <div className="fixed inset-0 z-40" onClick={() => setShowBranchDropdown(false)} />
+      )}
+
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {/* Changes section (resizable) */}
+        <div style={{ height: changesHeight }} className="flex flex-col overflow-hidden border-b border-dark-border">
+          {/* Staged Changes */}
           <div className="border-b border-dark-border">
-            <div className="px-4 py-2 bg-dark-hover text-sm font-medium">
-              Changes ({changedFiles.length})
+            <div className="flex items-center justify-between px-4 py-2 bg-dark-hover">
+              <span className="text-sm font-medium text-green-400">Staged ({stagedFiles.length})</span>
+              {stagedFiles.length > 0 && (
+                <button
+                  onClick={() => handleUnstage(stagedFiles.map(f => getFileNameFromPath(f.file)))}
+                  className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+                  title="Unstage all"
+                >
+                  − All
+                </button>
+              )}
             </div>
-            <div className="max-h-48 overflow-auto">
-              {changedFiles.map((file, index) => (
+            <div className="overflow-auto max-h-24">
+              {stagedFiles.map((file, index) => (
                 <div
                   key={`${file.file}-${index}`}
                   className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
                   onClick={() => handleOpenChangedFile(file)}
-                  title={`${file.status}${file.staged ? ' (staged)' : ''}: ${file.file}`}
                 >
                   <span className="w-4 flex-shrink-0 flex items-center justify-center">
                     {getStatusIcon(file.status)}
@@ -252,122 +410,107 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
                   <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
                     {file.file}
                   </span>
-                  <svg
-                    className="w-4 h-4 text-dark-muted opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleUnstage([getFileNameFromPath(file.file)]) }}
+                    className="p-1 opacity-0 group-hover:opacity-100 text-dark-muted hover:text-red-400 transition-all"
+                    title="Unstage"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                    </svg>
+                  </button>
                 </div>
               ))}
             </div>
           </div>
-        )}
 
-        {/* Branches Section */}
-        <div className="border-b border-dark-border">
-          <div className="flex items-center justify-between px-4 py-2 bg-dark-hover">
-            <span className="text-sm font-medium">Branches</span>
-            <button
-              onClick={() => setIsCreatingBranch(true)}
-              className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-            >
-              + New
-            </button>
-          </div>
-
-          {isCreatingBranch && (
-            <div className="px-4 py-2 bg-dark-card border-b border-dark-border">
-              <input
-                type="text"
-                value={newBranchName}
-                onChange={(e) => setNewBranchName(e.target.value)}
-                placeholder="Branch name..."
-                className="w-full bg-dark-bg border border-dark-border rounded px-2 py-1 text-sm mb-2 focus:outline-none focus:border-blue-500"
-                autoFocus
-              />
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-dark-muted">from:</span>
-                <select
-                  value={baseBranch}
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                  className="flex-1 bg-dark-bg border border-dark-border rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
-                >
-                  {branches.map((b) => (
-                    <option key={b.name} value={b.name}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2 mt-2">
+          {/* Unstaged Changes */}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-4 py-2 bg-dark-hover">
+              <span className="text-sm font-medium text-yellow-400">Changes ({unstagedFiles.length})</span>
+              {unstagedFiles.length > 0 && (
                 <button
-                  onClick={handleCreateBranch}
-                  disabled={!newBranchName.trim()}
-                  className="px-3 py-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm rounded transition-colors"
+                  onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
+                  className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+                  title="Stage all"
                 >
-                  Create & Checkout
+                  + All
                 </button>
-                <button
-                  onClick={() => {
-                    setIsCreatingBranch(false)
-                    setNewBranchName('')
-                  }}
-                  className="px-3 py-1 text-dark-muted hover:text-dark-text text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
+              )}
             </div>
-          )}
-
-          <div className="max-h-40 overflow-auto">
-            {branches.map((branch) => (
-              <div
-                key={branch.name}
-                className={`flex items-center justify-between px-4 py-2 hover:bg-dark-hover cursor-pointer group ${
-                  branch.current ? 'bg-dark-hover' : ''
-                }`}
-                onClick={() => !branch.current && handleCheckout(branch.name)}
-              >
-                <div className="flex items-center gap-2">
-                  {branch.current ? (
-                    <span className="w-2 h-2 rounded-full bg-green-400" />
-                  ) : (
-                    <span className="w-2 h-2" />
-                  )}
-                  <span className={`text-sm ${branch.current ? 'text-green-400 font-medium' : ''}`}>
-                    {branch.name}
+            <div className="overflow-auto flex-1">
+              {unstagedFiles.map((file, index) => (
+                <div
+                  key={`${file.file}-${index}`}
+                  className="flex items-center gap-2 px-4 py-1.5 hover:bg-dark-hover cursor-pointer group"
+                  onClick={() => handleOpenChangedFile(file)}
+                >
+                  <span className="w-4 flex-shrink-0 flex items-center justify-center">
+                    {getStatusIcon(file.status)}
                   </span>
+                  <span className={`text-sm truncate flex-1 font-mono ${getStatusColor(file.status)}`}>
+                    {file.file}
+                  </span>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    {file.status !== 'untracked' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDiscard(getFileNameFromPath(file.file)) }}
+                        className="p-1 text-dark-muted hover:text-orange-400"
+                        title="Discard changes"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                        </svg>
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleStage([getFileNameFromPath(file.file)]) }}
+                      className="p-1 text-dark-muted hover:text-green-400"
+                      title="Stage"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                {!branch.current && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDeleteBranch(branch.name)
-                    }}
-                    className="p-1 opacity-0 group-hover:opacity-100 text-red-400 hover:bg-dark-border rounded transition-all"
-                    title="Delete branch"
-                  >
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Recent Commits Section */}
-        <div>
-          <div className="px-4 py-2 bg-dark-hover text-sm font-medium">
+        {/* Resize handle */}
+        <div
+          className="h-1 bg-dark-border hover:bg-blue-500 cursor-row-resize flex-shrink-0 transition-colors"
+          onMouseDown={() => setIsDragging(true)}
+        />
+
+        {/* Commit section */}
+        {stagedFiles.length > 0 && (
+          <div className="px-4 py-3 border-b border-dark-border">
+            <textarea
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              placeholder="Commit message..."
+              className="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
+              rows={2}
+            />
+            <button
+              onClick={handleCommit}
+              disabled={!commitMessage.trim() || isCommitting}
+              className="w-full mt-2 px-4 py-2 text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:hover:bg-green-600 text-white rounded transition-colors"
+            >
+              {isCommitting ? 'Committing...' : `Commit (${stagedFiles.length} file${stagedFiles.length > 1 ? 's' : ''})`}
+            </button>
+          </div>
+        )}
+
+        {/* Recent Commits */}
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <div className="px-4 py-2 bg-dark-hover text-sm font-medium flex-shrink-0">
             Recent Commits
           </div>
-          <div>
+          <div className="overflow-auto flex-1">
             {commits.map((commit) => (
               <div
                 key={commit.hash}
@@ -395,7 +538,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
             className="bg-dark-card border border-dark-border rounded-lg w-[600px] max-h-[80vh] overflow-hidden shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
             <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
               <div>
                 <span className="text-blue-400 font-mono text-sm">{selectedCommit.shortHash}</span>
@@ -411,7 +553,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
               </button>
             </div>
 
-            {/* Details */}
             <div className="px-4 py-3 border-b border-dark-border text-sm">
               <div className="text-dark-muted">
                 Author: <span className="text-dark-text">{selectedCommit.author}</span>
@@ -421,7 +562,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
               </div>
             </div>
 
-            {/* Changed Files */}
             <div className="px-4 py-2 text-sm font-medium bg-dark-hover">
               Files changed ({selectedCommit.files.length}):
             </div>
@@ -436,12 +576,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
                   <div className="flex items-center gap-2 text-xs">
                     {file.insertions > 0 && <span className="text-green-400">+{file.insertions}</span>}
                     {file.deletions > 0 && <span className="text-red-400">-{file.deletions}</span>}
-                    <button className="p-1 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    </button>
                   </div>
                 </div>
               ))}

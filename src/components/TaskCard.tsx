@@ -156,6 +156,19 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
               </svg>
             </button>
           )}
+          {/* Archive button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              updateTask(task.id, { archived: !task.archived })
+            }}
+            className="p-1 text-dark-muted hover:text-yellow-400 hover:bg-dark-hover rounded"
+            title={task.archived ? 'Unarchive task' : 'Archive task'}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+            </svg>
+          </button>
           {/* Delete button */}
           <button
             onClick={(e) => {

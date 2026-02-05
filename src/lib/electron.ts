@@ -100,6 +100,12 @@ declare global {
       gitCheckout: (projectPath: string, branch: string) => Promise<boolean>
       gitCreateBranch: (projectPath: string, branchName: string, baseBranch?: string) => Promise<boolean>
       gitDeleteBranch: (projectPath: string, branchName: string) => Promise<boolean>
+      gitStage: (projectPath: string, files: string[]) => Promise<boolean>
+      gitUnstage: (projectPath: string, files: string[]) => Promise<boolean>
+      gitDiscard: (projectPath: string, files: string[]) => Promise<boolean>
+      gitCommit: (projectPath: string, message: string) => Promise<boolean>
+      gitPush: (projectPath: string) => Promise<boolean>
+      gitPull: (projectPath: string) => Promise<boolean>
       // Update methods
       updateCheck: () => Promise<void>
       updateDownload: () => Promise<void>

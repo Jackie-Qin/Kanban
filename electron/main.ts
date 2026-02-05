@@ -697,6 +697,72 @@ ipcMain.handle('git-delete-branch', async (_event, projectPath: string, branchNa
   }
 })
 
+ipcMain.handle('git-stage', async (_event, projectPath: string, files: string[]): Promise<boolean> => {
+  try {
+    const git = getGit(projectPath)
+    await git.add(files)
+    return true
+  } catch (error) {
+    console.error('Git stage error:', error)
+    return false
+  }
+})
+
+ipcMain.handle('git-unstage', async (_event, projectPath: string, files: string[]): Promise<boolean> => {
+  try {
+    const git = getGit(projectPath)
+    await git.reset(['HEAD', '--', ...files])
+    return true
+  } catch (error) {
+    console.error('Git unstage error:', error)
+    return false
+  }
+})
+
+ipcMain.handle('git-discard', async (_event, projectPath: string, files: string[]): Promise<boolean> => {
+  try {
+    const git = getGit(projectPath)
+    await git.checkout(['--', ...files])
+    return true
+  } catch (error) {
+    console.error('Git discard error:', error)
+    return false
+  }
+})
+
+ipcMain.handle('git-commit', async (_event, projectPath: string, message: string): Promise<boolean> => {
+  try {
+    const git = getGit(projectPath)
+    await git.commit(message)
+    return true
+  } catch (error) {
+    console.error('Git commit error:', error)
+    return false
+  }
+})
+
+ipcMain.handle('git-push', async (_event, projectPath: string): Promise<boolean> => {
+  try {
+    const git = getGit(projectPath)
+    await git.push()
+    return true
+  } catch (error) {
+    console.error('Git push error:', error)
+    return false
+  }
+})
+
+ipcMain.handle('git-pull', async (_event, projectPath: string): Promise<boolean> => {
+  try {
+    const git = getGit(projectPath)
+    await git.pull()
+    return true
+  } catch (error) {
+    console.error('Git pull error:', error)
+    return false
+  }
+})
+
 // Search Handlers
 interface SearchFileResult {
   path: string

@@ -1,6 +1,6 @@
 {
   "name": "kanban",
-  "version": "1.1.9",
+  "version": "1.2.0",
   "description": "A beautiful Kanban board with project switching and iTerm2 integration",
   "main": "dist-electron/main.js",
   "scripts": {
