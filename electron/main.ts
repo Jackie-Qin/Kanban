@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import fs from 'fs'
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
@@ -66,8 +67,124 @@ function createWindow() {
   }
 }
 
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow?.webContents.send('update-status', { status: 'checking' })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    mainWindow?.webContents.send('update-status', {
+      status: 'available',
+      version: info.version,
+      releaseNotes: info.releaseNotes
+    })
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    mainWindow?.webContents.send('update-status', { status: 'not-available' })
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    mainWindow?.webContents.send('update-status', {
+      status: 'downloading',
+      percent: progress.percent
+    })
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    mainWindow?.webContents.send('update-status', { status: 'downloaded' })
+  })
+
+  autoUpdater.on('error', (error) => {
+    mainWindow?.webContents.send('update-status', {
+      status: 'error',
+      message: error.message
+    })
+  })
+}
+
+function createMenu() {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' }
+      ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Check for Updates...',
+          click: () => {
+            autoUpdater.checkForUpdates()
+          }
+        }
+      ]
+    }
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+}
+
 app.whenReady().then(() => {
+  createMenu()
   createWindow()
+  setupAutoUpdater()
+
+  // Check for updates on startup (production only)
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates()
+    }, 3000)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -95,6 +212,23 @@ ipcMain.handle('load-data', () => {
 ipcMain.handle('save-data', (_event, data) => {
   saveData(data)
   return true
+})
+
+// Update Handlers
+ipcMain.handle('update-check', () => {
+  autoUpdater.checkForUpdates()
+})
+
+ipcMain.handle('update-download', () => {
+  autoUpdater.downloadUpdate()
+})
+
+ipcMain.handle('update-install', () => {
+  autoUpdater.quitAndInstall()
+})
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion()
 })
 
 ipcMain.handle('open-iterm', (_event, projectPath: string) => {

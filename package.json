@@ -19,6 +19,7 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "dockview": "^4.13.1",
+    "electron-updater": "^6.7.3",
     "node-pty": "^1.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -50,11 +51,17 @@
     "directories": {
       "output": "release"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "jackieqin",
+      "repo": "Kanban"
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "target": [
-        "dir"
+        "zip",
+        "dmg"
       ],
       "identity": null
     },

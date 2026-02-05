@@ -42,6 +42,14 @@ interface GitDiffFile {
   binary: boolean
 }
 
+interface UpdateStatus {
+  status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  version?: string
+  releaseNotes?: string
+  percent?: number
+  message?: string
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   loadData: () => ipcRenderer.invoke('load-data'),
   saveData: (data: unknown) => ipcRenderer.invoke('save-data', data),
@@ -105,5 +113,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gitCreateBranch: (projectPath: string, branchName: string, baseBranch?: string): Promise<boolean> =>
     ipcRenderer.invoke('git-create-branch', projectPath, branchName, baseBranch),
   gitDeleteBranch: (projectPath: string, branchName: string): Promise<boolean> =>
-    ipcRenderer.invoke('git-delete-branch', projectPath, branchName)
+    ipcRenderer.invoke('git-delete-branch', projectPath, branchName),
+
+  // Update methods
+  updateCheck: () => ipcRenderer.invoke('update-check'),
+  updateDownload: () => ipcRenderer.invoke('update-download'),
+  updateInstall: () => ipcRenderer.invoke('update-install'),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => {
+      callback(status)
+    }
+    ipcRenderer.on('update-status', listener)
+    return () => ipcRenderer.removeListener('update-status', listener)
+  }
 })

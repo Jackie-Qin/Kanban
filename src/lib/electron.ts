@@ -42,6 +42,14 @@ export interface GitDiffFile {
   binary: boolean
 }
 
+export interface UpdateStatus {
+  status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  version?: string
+  releaseNotes?: string
+  percent?: number
+  message?: string
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -74,6 +82,12 @@ declare global {
       gitCheckout: (projectPath: string, branch: string) => Promise<boolean>
       gitCreateBranch: (projectPath: string, branchName: string, baseBranch?: string) => Promise<boolean>
       gitDeleteBranch: (projectPath: string, branchName: string) => Promise<boolean>
+      // Update methods
+      updateCheck: () => Promise<void>
+      updateDownload: () => Promise<void>
+      updateInstall: () => Promise<void>
+      getAppVersion: () => Promise<string>
+      onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
     }
   }
 }

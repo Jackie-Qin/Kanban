@@ -5,6 +5,7 @@ import WorkspaceLayout from './components/WorkspaceLayout'
 import AddProjectModal from './components/AddProjectModal'
 import TaskModal from './components/TaskModal'
 import SettingsModal from './components/SettingsModal'
+import UpdateNotification from './components/UpdateNotification'
 import { Task } from './types'
 
 export default function App() {
@@ -73,6 +74,8 @@ export default function App() {
       {showSettings && (
         <SettingsModal onClose={() => setShowSettings(false)} />
       )}
+
+      <UpdateNotification />
     </div>
   )
 }

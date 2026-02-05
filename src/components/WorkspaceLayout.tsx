@@ -247,6 +247,7 @@ export default function WorkspaceLayout({
   return (
     <div className="h-full w-full relative" onContextMenu={handleContextMenu}>
       <DockviewReact
+        key={projectId}
         components={components}
         onReady={onReady}
         className="dockview-theme-dark"
