@@ -260,11 +260,11 @@ export default function FileIcon({ name, className = 'w-4 h-4' }: FileIconProps)
       style={{
         display: 'inline-block',
         backgroundColor: color,
-        WebkitMaskImage: `url(/seti-icons/${iconName}.svg)`,
+        WebkitMaskImage: `url(./seti-icons/${iconName}.svg)`,
         WebkitMaskSize: 'contain',
         WebkitMaskRepeat: 'no-repeat',
         WebkitMaskPosition: 'center',
-        maskImage: `url(/seti-icons/${iconName}.svg)`,
+        maskImage: `url(./seti-icons/${iconName}.svg)`,
         maskSize: 'contain',
         maskRepeat: 'no-repeat',
         maskPosition: 'center',
