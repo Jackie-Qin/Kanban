@@ -8,6 +8,13 @@ interface TerminalInfo {
   name: string
 }
 
+interface ProjectTerminalState {
+  terminals: TerminalInfo[]
+  activeTerminalId: string
+  isSplitView: boolean
+  projectPath: string
+}
+
 interface TerminalDockPanelParams {
   projectId: string
   projectPath: string
@@ -22,29 +29,65 @@ const MAX_TERMINALS = 3
 const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<TerminalDockPanelParams>>(
   ({ params }, ref) => {
     const { projectId, projectPath } = params
-    const [terminals, setTerminals] = useState<TerminalInfo[]>([
-      { id: `${projectId}-term-1`, name: 'Terminal 1' }
-    ])
-    const [activeTerminalId, setActiveTerminalId] = useState(`${projectId}-term-1`)
-    const [isSplitView, setIsSplitView] = useState(false)
-    const terminalsRef = useRef(terminals)
-    const currentProjectIdRef = useRef(projectId)
 
-    // Reset terminals when project changes
+    // Store terminal state for ALL projects to keep them alive across switches
+    const [projectStates, setProjectStates] = useState<Record<string, ProjectTerminalState>>({})
+    const terminalsRef = useRef<TerminalInfo[]>([])
+
+    // Initialize or update state for current project
     useEffect(() => {
-      if (currentProjectIdRef.current !== projectId) {
-        currentProjectIdRef.current = projectId
-        const newTerminals = [{ id: `${projectId}-term-1`, name: 'Terminal 1' }]
-        setTerminals(newTerminals)
-        setActiveTerminalId(`${projectId}-term-1`)
-        setIsSplitView(false)
-      }
-    }, [projectId])
+      setProjectStates(prev => {
+        if (prev[projectId]) {
+          // Project exists, update projectPath if changed
+          if (prev[projectId].projectPath !== projectPath) {
+            return {
+              ...prev,
+              [projectId]: { ...prev[projectId], projectPath }
+            }
+          }
+          return prev
+        }
+        // Initialize new project with default terminal
+        return {
+          ...prev,
+          [projectId]: {
+            terminals: [{ id: `${projectId}-term-1`, name: 'Terminal 1' }],
+            activeTerminalId: `${projectId}-term-1`,
+            isSplitView: false,
+            projectPath
+          }
+        }
+      })
+    }, [projectId, projectPath])
+
+    // Get current project's state (with fallback for initial render)
+    const currentState = projectStates[projectId] || {
+      terminals: [{ id: `${projectId}-term-1`, name: 'Terminal 1' }],
+      activeTerminalId: `${projectId}-term-1`,
+      isSplitView: false,
+      projectPath
+    }
+
+    const { terminals, activeTerminalId, isSplitView } = currentState
 
     // Keep ref in sync with state for keyboard handler
     useEffect(() => {
       terminalsRef.current = terminals
     }, [terminals])
+
+    // Helper to update current project's state
+    const updateCurrentProjectState = useCallback(
+      (updater: (state: ProjectTerminalState) => Partial<ProjectTerminalState>) => {
+        setProjectStates(prev => {
+          const current = prev[projectId] || currentState
+          return {
+            ...prev,
+            [projectId]: { ...current, ...updater(current) }
+          }
+        })
+      },
+      [projectId, currentState]
+    )
 
     // Expose sendCommand method via ref
     useImperativeHandle(ref, () => ({
@@ -61,26 +104,46 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
         id: `${projectId}-term-${Date.now()}`,
         name: `Terminal ${newIndex}`
       }
-      setTerminals((prev) => [...prev, newTerminal])
-      setActiveTerminalId(newTerminal.id)
-    }, [terminals.length, projectId])
+      updateCurrentProjectState(() => ({
+        terminals: [...terminals, newTerminal],
+        activeTerminalId: newTerminal.id
+      }))
+    }, [terminals, projectId, updateCurrentProjectState])
 
     const closeTerminal = useCallback(
       (terminalId: string) => {
-        setTerminals((prev) => {
-          const newTerminals = prev.filter((t) => t.id !== terminalId)
-          if (newTerminals.length === 0) {
-            // Re-add default terminal
-            return [{ id: `${projectId}-term-${Date.now()}`, name: 'Terminal 1' }]
-          }
-          // If closing active terminal, switch to another
-          if (terminalId === activeTerminalId) {
-            setActiveTerminalId(newTerminals[0].id)
-          }
-          return newTerminals
-        })
+        const newTerminals = terminals.filter((t) => t.id !== terminalId)
+        if (newTerminals.length === 0) {
+          // Re-add default terminal
+          const newId = `${projectId}-term-${Date.now()}`
+          updateCurrentProjectState(() => ({
+            terminals: [{ id: newId, name: 'Terminal 1' }],
+            activeTerminalId: newId
+          }))
+          return
+        }
+        // If closing active terminal, switch to another
+        const newActiveId = terminalId === activeTerminalId ? newTerminals[0].id : activeTerminalId
+        updateCurrentProjectState(() => ({
+          terminals: newTerminals,
+          activeTerminalId: newActiveId
+        }))
       },
-      [activeTerminalId, projectId]
+      [terminals, activeTerminalId, projectId, updateCurrentProjectState]
+    )
+
+    const setActiveTerminalId = useCallback(
+      (id: string) => {
+        updateCurrentProjectState(() => ({ activeTerminalId: id }))
+      },
+      [updateCurrentProjectState]
+    )
+
+    const setIsSplitView = useCallback(
+      (split: boolean) => {
+        updateCurrentProjectState(() => ({ isSplitView: split }))
+      },
+      [updateCurrentProjectState]
     )
 
     // Keyboard shortcuts for tab switching (⌘1, ⌘2, ⌘3)
@@ -101,7 +164,7 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
 
       document.addEventListener('keydown', handleKeyDown)
       return () => document.removeEventListener('keydown', handleKeyDown)
-    }, [])
+    }, [setActiveTerminalId])
 
     return (
       <div className="h-full w-full flex flex-col bg-dark-bg">
@@ -198,47 +261,61 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
           </div>
         </div>
 
-        {/* Terminal content area */}
-        <div className="flex-1 flex overflow-hidden min-h-0 bg-dark-bg">
-          {isSplitView ? (
-            // Split view - show all terminals side by side
-            terminals.map((terminal, index) => (
+        {/* Terminal content area - render ALL project terminals to keep them alive */}
+        <div className="flex-1 flex overflow-hidden min-h-0 bg-dark-bg relative">
+          {Object.entries(projectStates).map(([pid, state]) => {
+            const isCurrentProject = pid === projectId
+            return (
               <div
-                key={terminal.id}
-                className="flex-1 h-full min-w-0 min-h-0"
+                key={pid}
+                className="absolute inset-0 flex"
                 style={{
-                  width: `${100 / terminals.length}%`,
-                  borderLeft: index > 0 ? '1px solid rgba(255, 255, 255, 0.1)' : 'none'
+                  visibility: isCurrentProject ? 'visible' : 'hidden',
+                  pointerEvents: isCurrentProject ? 'auto' : 'none'
                 }}
               >
-                <Terminal
-                  terminalId={terminal.id}
-                  projectPath={projectPath}
-                  isActive={activeTerminalId === terminal.id}
-                  onSelect={() => setActiveTerminalId(terminal.id)}
-                />
+                {state.isSplitView ? (
+                  // Split view - show all terminals side by side
+                  state.terminals.map((terminal, index) => (
+                    <div
+                      key={terminal.id}
+                      className="flex-1 h-full min-w-0 min-h-0"
+                      style={{
+                        width: `${100 / state.terminals.length}%`,
+                        borderLeft: index > 0 ? '1px solid rgba(255, 255, 255, 0.1)' : 'none'
+                      }}
+                    >
+                      <Terminal
+                        terminalId={terminal.id}
+                        projectPath={state.projectPath}
+                        isActive={isCurrentProject && state.activeTerminalId === terminal.id}
+                        onSelect={() => setActiveTerminalId(terminal.id)}
+                      />
+                    </div>
+                  ))
+                ) : (
+                  // Single view - show only active terminal at 100%
+                  state.terminals.map((terminal) => (
+                    <div
+                      key={terminal.id}
+                      className="h-full min-w-0 min-h-0"
+                      style={{
+                        width: state.activeTerminalId === terminal.id ? '100%' : '0%',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      <Terminal
+                        terminalId={terminal.id}
+                        projectPath={state.projectPath}
+                        isActive={isCurrentProject && state.activeTerminalId === terminal.id}
+                        onSelect={() => setActiveTerminalId(terminal.id)}
+                      />
+                    </div>
+                  ))
+                )}
               </div>
-            ))
-          ) : (
-            // Single view - show only active terminal at 100%
-            terminals.map((terminal) => (
-              <div
-                key={terminal.id}
-                className="h-full min-w-0 min-h-0"
-                style={{
-                  width: activeTerminalId === terminal.id ? '100%' : '0%',
-                  overflow: 'hidden'
-                }}
-              >
-                <Terminal
-                  terminalId={terminal.id}
-                  projectPath={projectPath}
-                  isActive={activeTerminalId === terminal.id}
-                  onSelect={() => setActiveTerminalId(terminal.id)}
-                />
-              </div>
-            ))
-          )}
+            )
+          })}
         </div>
       </div>
     )
