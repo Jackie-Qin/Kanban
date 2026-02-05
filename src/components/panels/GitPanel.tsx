@@ -31,7 +31,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   const [branches, setBranches] = useState<GitBranch[]>([])
   const [commits, setCommits] = useState<GitCommit[]>([])
   const [selectedCommit, setSelectedCommit] = useState<(GitCommit & { files: GitDiffFile[] }) | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
   const [showBranchDropdown, setShowBranchDropdown] = useState(false)
   const [isCreatingBranch, setIsCreatingBranch] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
@@ -55,7 +54,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   const fetchData = useCallback(async () => {
     if (!projectPath) return
 
-    setIsLoading(true)
     try {
       const [statusResult, changedFilesResult, branchesResult, commitsResult] = await Promise.all([
         electron.gitStatus(projectPath),
@@ -71,7 +69,6 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     } catch (error) {
       console.error('Failed to fetch git data:', error)
     }
-    setIsLoading(false)
   }, [projectPath])
 
   useEffect(() => {

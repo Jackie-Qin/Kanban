@@ -10,7 +10,7 @@
     "electron:dev": "concurrently \"vite\" \"electron .\"",
     "start": "electron .",
     "postinstall": "electron-builder install-app-deps",
-    "install-local": "npm run build && osascript -e 'quit app \"Kanban\"' 2>/dev/null; pkill -f 'electron.*Kanban' 2>/dev/null; sleep 1 && rm -rf /Applications/Kanban.app && cp -R release/mac-arm64/Kanban.app /Applications/ && open /Applications/Kanban.app"
+    "install-local": "tsc && vite build && electron-builder --dir && osascript -e 'quit app \"Kanban\"' 2>/dev/null; pkill -f 'electron.*Kanban' 2>/dev/null; sleep 1 && rm -rf /Applications/Kanban.app && cp -R release/mac-arm64/Kanban.app /Applications/ && open /Applications/Kanban.app"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
