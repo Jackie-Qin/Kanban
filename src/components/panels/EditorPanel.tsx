@@ -1,0 +1,418 @@
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { IDockviewPanelProps } from 'dockview'
+import Editor, { OnMount } from '@monaco-editor/react'
+import { electron } from '../../lib/electron'
+import FileIcon from '../FileIcon'
+
+interface EditorPanelParams {
+  projectId: string
+  projectPath: string
+}
+
+interface OpenFile {
+  path: string
+  name: string
+  content: string
+  originalContent: string
+  isPreview: boolean
+  isModified: boolean
+}
+
+// Get language from file extension
+function getLanguage(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase()
+  switch (ext) {
+    case 'ts':
+      return 'typescript'
+    case 'tsx':
+      return 'typescript'
+    case 'js':
+      return 'javascript'
+    case 'jsx':
+      return 'javascript'
+    case 'json':
+      return 'json'
+    case 'html':
+      return 'html'
+    case 'css':
+      return 'css'
+    case 'scss':
+      return 'scss'
+    case 'sass':
+      return 'sass'
+    case 'less':
+      return 'less'
+    case 'md':
+      return 'markdown'
+    case 'py':
+      return 'python'
+    case 'go':
+      return 'go'
+    case 'rs':
+      return 'rust'
+    case 'java':
+      return 'java'
+    case 'swift':
+      return 'swift'
+    case 'kt':
+    case 'kts':
+      return 'kotlin'
+    case 'c':
+      return 'c'
+    case 'cpp':
+    case 'cc':
+    case 'cxx':
+      return 'cpp'
+    case 'h':
+    case 'hpp':
+      return 'cpp'
+    case 'm':
+    case 'mm':
+      return 'objective-c'
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+      return 'shell'
+    case 'yml':
+    case 'yaml':
+      return 'yaml'
+    case 'xml':
+    case 'plist':
+      return 'xml'
+    case 'sql':
+      return 'sql'
+    case 'graphql':
+    case 'gql':
+      return 'graphql'
+    case 'rb':
+      return 'ruby'
+    case 'php':
+      return 'php'
+    case 'r':
+      return 'r'
+    case 'lua':
+      return 'lua'
+    case 'dart':
+      return 'dart'
+    case 'dockerfile':
+      return 'dockerfile'
+    default:
+      // Check filename for special files
+      const lowerName = filename.toLowerCase()
+      if (lowerName === 'dockerfile') return 'dockerfile'
+      if (lowerName === 'makefile') return 'makefile'
+      if (lowerName.endsWith('.podspec')) return 'ruby'
+      return 'plaintext'
+  }
+}
+
+export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParams>) {
+  const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editorRef = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const monacoRef = useRef<any>(null)
+
+  const activeFile = openFiles.find((f) => f.path === activeFilePath)
+
+  // Listen for file open requests from Directory panel
+  useEffect(() => {
+    const handleOpenFile = (e: Event) => {
+      const customEvent = e as CustomEvent<{ path: string; preview: boolean }>
+      const { path, preview } = customEvent.detail
+      openFile(path, preview)
+    }
+
+    window.addEventListener('editor:open-file', handleOpenFile)
+    return () => window.removeEventListener('editor:open-file', handleOpenFile)
+  }, [openFiles])
+
+  const openFile = useCallback(
+    async (filePath: string, isPreview: boolean) => {
+      // Check if file is already open
+      const existingIndex = openFiles.findIndex((f) => f.path === filePath)
+      if (existingIndex !== -1) {
+        // If already open, just make it active
+        setActiveFilePath(filePath)
+        // If opening permanently, convert from preview
+        if (!isPreview) {
+          setOpenFiles((prev) =>
+            prev.map((f) => (f.path === filePath ? { ...f, isPreview: false } : f))
+          )
+        }
+        return
+      }
+
+      // Load file content
+      const content = await electron.fsReadFile(filePath)
+      if (content === null) {
+        console.error('Failed to read file:', filePath)
+        return
+      }
+
+      const name = filePath.split('/').pop() || filePath
+
+      const newFile: OpenFile = {
+        path: filePath,
+        name,
+        content,
+        originalContent: content,
+        isPreview,
+        isModified: false
+      }
+
+      setOpenFiles((prev) => {
+        // If opening in preview mode, replace existing preview tab
+        if (isPreview) {
+          const previewIndex = prev.findIndex((f) => f.isPreview)
+          if (previewIndex !== -1) {
+            const newFiles = [...prev]
+            newFiles[previewIndex] = newFile
+            return newFiles
+          }
+        }
+        return [...prev, newFile]
+      })
+      setActiveFilePath(filePath)
+    },
+    [openFiles]
+  )
+
+  const closeFile = useCallback(
+    (filePath: string) => {
+      const fileIndex = openFiles.findIndex((f) => f.path === filePath)
+      if (fileIndex === -1) return
+
+      const file = openFiles[fileIndex]
+      if (file.isModified) {
+        const save = window.confirm(`Save changes to ${file.name}?`)
+        if (save) {
+          electron.fsWriteFile(filePath, file.content)
+        }
+      }
+
+      setOpenFiles((prev) => prev.filter((f) => f.path !== filePath))
+
+      // If closing active file, switch to another
+      if (activeFilePath === filePath) {
+        const remaining = openFiles.filter((f) => f.path !== filePath)
+        if (remaining.length > 0) {
+          const newActiveIndex = Math.min(fileIndex, remaining.length - 1)
+          setActiveFilePath(remaining[newActiveIndex].path)
+        } else {
+          setActiveFilePath(null)
+        }
+      }
+    },
+    [openFiles, activeFilePath]
+  )
+
+  const saveFile = useCallback(async () => {
+    if (!activeFile) return
+
+    const success = await electron.fsWriteFile(activeFile.path, activeFile.content)
+    if (success) {
+      setOpenFiles((prev) =>
+        prev.map((f) =>
+          f.path === activeFile.path
+            ? { ...f, originalContent: f.content, isModified: false }
+            : f
+        )
+      )
+    }
+  }, [activeFile])
+
+  const handleEditorChange = useCallback(
+    (value: string | undefined) => {
+      if (!activeFilePath || value === undefined) return
+
+      setOpenFiles((prev) =>
+        prev.map((f) =>
+          f.path === activeFilePath
+            ? {
+                ...f,
+                content: value,
+                isModified: value !== f.originalContent,
+                isPreview: false // Convert to permanent tab on edit
+              }
+            : f
+        )
+      )
+    },
+    [activeFilePath]
+  )
+
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor
+    monacoRef.current = monaco
+
+    // Configure editor theme with neutral dark gray
+    monaco.editor.defineTheme('kanban-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [],
+      colors: {
+        'editor.background': '#1a1a1a',
+        'editor.foreground': '#e0e0e0',
+        'editor.lineHighlightBackground': '#2a2a2a',
+        'editorLineNumber.foreground': '#666666',
+        'editorLineNumber.activeForeground': '#e0e0e0',
+        'editor.selectionBackground': '#404040',
+        'editor.inactiveSelectionBackground': '#353535',
+        'editorGutter.background': '#1a1a1a',
+        'minimap.background': '#1f1f1f'
+      }
+    })
+    monaco.editor.setTheme('kanban-dark')
+
+    // Add save shortcut
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      saveFile()
+    })
+  }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey) {
+        if (e.key === 's') {
+          e.preventDefault()
+          saveFile()
+        } else if (e.key === 'w') {
+          e.preventDefault()
+          if (activeFilePath) {
+            closeFile(activeFilePath)
+          }
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [saveFile, closeFile, activeFilePath])
+
+  // Expose openFile method globally for Directory panel
+  useEffect(() => {
+    (window as unknown as { editorOpenFile: typeof openFile }).editorOpenFile = openFile
+  }, [openFile])
+
+  return (
+    <div className="h-full w-full flex flex-col bg-dark-bg">
+      {/* Tab bar */}
+      {openFiles.length > 0 && (
+        <div className="flex items-center border-b border-dark-border bg-dark-card overflow-x-auto hide-scrollbar">
+          {openFiles.map((file) => (
+            <div
+              key={file.path}
+              className={`group flex items-center gap-2 px-3 py-2 cursor-pointer border-r border-dark-border text-sm ${
+                activeFilePath === file.path
+                  ? 'bg-dark-bg text-white'
+                  : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
+              }`}
+              onClick={() => setActiveFilePath(file.path)}
+            >
+              <FileIcon name={file.name} isDirectory={false} className="w-4 h-4 flex-shrink-0" />
+              <span className={file.isPreview ? 'italic' : ''}>
+                {file.name}
+              </span>
+              {file.isModified ? (
+                <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeFile(file.path)
+                  }}
+                  className="p-0.5 opacity-0 group-hover:opacity-100 hover:bg-dark-border rounded transition-opacity"
+                >
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Editor area */}
+      <div className="flex-1 min-h-0">
+        {activeFile ? (
+          <Editor
+            height="100%"
+            language={getLanguage(activeFile.name)}
+            value={activeFile.content}
+            onChange={handleEditorChange}
+            onMount={handleEditorMount}
+            options={{
+              fontSize: 13,
+              fontFamily: 'Menlo, Monaco, "SF Mono", "Fira Code", Consolas, monospace',
+              minimap: {
+                enabled: true,
+                maxColumn: 80,
+                renderCharacters: false,
+                showSlider: 'always',
+                side: 'right',
+                scale: 1
+              },
+              scrollBeyondLastLine: false,
+              lineNumbers: 'on',
+              renderLineHighlight: 'line',
+              tabSize: 2,
+              insertSpaces: true,
+              wordWrap: 'off',
+              automaticLayout: true,
+              padding: { top: 8, bottom: 8 },
+              smoothScrolling: true,
+              cursorBlinking: 'smooth',
+              cursorSmoothCaretAnimation: 'on',
+              bracketPairColorization: { enabled: true },
+              guides: {
+                bracketPairs: true,
+                indentation: true
+              }
+            }}
+            theme="vs-dark"
+          />
+        ) : (
+          <div className="h-full flex items-center justify-center text-dark-muted">
+            <div className="text-center">
+              <svg
+                className="w-16 h-16 mx-auto mb-4 opacity-50"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                />
+              </svg>
+              <p className="text-lg font-medium">No file open</p>
+              <p className="text-sm mt-1 opacity-75">
+                Select a file from the Directory panel
+              </p>
+              <div className="mt-4 text-xs opacity-50">
+                <p>Cmd+S to save</p>
+                <p>Cmd+W to close tab</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

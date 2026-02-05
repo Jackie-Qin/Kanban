@@ -1,0 +1,5 @@
+export { default as KanbanPanel } from './KanbanPanel'
+export { default as TerminalDockPanel } from './TerminalDockPanel'
+export { default as EditorPanel } from './EditorPanel'
+export { default as GitPanel } from './GitPanel'
+export { default as DirectoryPanel } from './DirectoryPanel'
