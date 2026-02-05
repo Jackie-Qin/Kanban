@@ -43,11 +43,8 @@ interface GitDiffFile {
 }
 
 interface UpdateStatus {
-  status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  status: 'checking' | 'available' | 'not-available'
   version?: string
-  releaseNotes?: string
-  percent?: number
-  message?: string
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -117,8 +114,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Update methods
   updateCheck: () => ipcRenderer.invoke('update-check'),
-  updateDownload: () => ipcRenderer.invoke('update-download'),
-  updateInstall: () => ipcRenderer.invoke('update-install'),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => {

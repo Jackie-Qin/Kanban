@@ -1,5 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron'
-import { autoUpdater } from 'electron-updater'
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell, net } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
@@ -67,45 +66,47 @@ function createWindow() {
   }
 }
 
-function setupAutoUpdater() {
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
-  // Allow updates without code signing (for personal/unsigned apps)
-  autoUpdater.forceDevUpdateConfig = true
+const GITHUB_RELEASES_API = 'https://api.github.com/repos/Jackie-Qin/Kanban/releases/latest'
 
-  autoUpdater.on('checking-for-update', () => {
-    mainWindow?.webContents.send('update-status', { status: 'checking' })
-  })
+function checkForUpdates() {
+  mainWindow?.webContents.send('update-status', { status: 'checking' })
 
-  autoUpdater.on('update-available', (info) => {
-    mainWindow?.webContents.send('update-status', {
-      status: 'available',
-      version: info.version,
-      releaseNotes: info.releaseNotes
+  const request = net.request(GITHUB_RELEASES_API)
+  request.setHeader('Accept', 'application/vnd.github.v3+json')
+  request.setHeader('User-Agent', 'Kanban-App')
+
+  let data = ''
+
+  request.on('response', (response) => {
+    response.on('data', (chunk) => {
+      data += chunk.toString()
+    })
+
+    response.on('end', () => {
+      try {
+        const release = JSON.parse(data)
+        const latestVersion = release.tag_name?.replace('v', '') || ''
+        const currentVersion = app.getVersion()
+
+        if (latestVersion && latestVersion !== currentVersion) {
+          mainWindow?.webContents.send('update-status', {
+            status: 'available',
+            version: latestVersion
+          })
+        } else {
+          mainWindow?.webContents.send('update-status', { status: 'not-available' })
+        }
+      } catch {
+        mainWindow?.webContents.send('update-status', { status: 'not-available' })
+      }
     })
   })
 
-  autoUpdater.on('update-not-available', () => {
+  request.on('error', () => {
     mainWindow?.webContents.send('update-status', { status: 'not-available' })
   })
 
-  autoUpdater.on('download-progress', (progress) => {
-    mainWindow?.webContents.send('update-status', {
-      status: 'downloading',
-      percent: progress.percent
-    })
-  })
-
-  autoUpdater.on('update-downloaded', () => {
-    mainWindow?.webContents.send('update-status', { status: 'downloaded' })
-  })
-
-  autoUpdater.on('error', (error) => {
-    mainWindow?.webContents.send('update-status', {
-      status: 'error',
-      message: error.message
-    })
-  })
+  request.end()
 }
 
 function createMenu() {
@@ -165,7 +166,13 @@ function createMenu() {
         {
           label: 'Check for Updates...',
           click: () => {
-            autoUpdater.checkForUpdates()
+            checkForUpdates()
+          }
+        },
+        {
+          label: 'Releases Page',
+          click: () => {
+            shell.openExternal('https://github.com/Jackie-Qin/Kanban/releases/latest')
           }
         }
       ]
@@ -179,12 +186,11 @@ function createMenu() {
 app.whenReady().then(() => {
   createMenu()
   createWindow()
-  setupAutoUpdater()
 
   // Check for updates on startup (production only)
   if (!process.env.VITE_DEV_SERVER_URL) {
     setTimeout(() => {
-      autoUpdater.checkForUpdates()
+      checkForUpdates()
     }, 3000)
   }
 
@@ -218,15 +224,7 @@ ipcMain.handle('save-data', (_event, data) => {
 
 // Update Handlers
 ipcMain.handle('update-check', () => {
-  autoUpdater.checkForUpdates()
-})
-
-ipcMain.handle('update-download', () => {
-  autoUpdater.downloadUpdate()
-})
-
-ipcMain.handle('update-install', () => {
-  autoUpdater.quitAndInstall()
+  checkForUpdates()
 })
 
 ipcMain.handle('get-app-version', () => {

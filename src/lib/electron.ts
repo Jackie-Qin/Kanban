@@ -43,11 +43,8 @@ export interface GitDiffFile {
 }
 
 export interface UpdateStatus {
-  status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  status: 'checking' | 'available' | 'not-available'
   version?: string
-  releaseNotes?: string
-  percent?: number
-  message?: string
 }
 
 declare global {

@@ -1,6 +1,6 @@
 {
   "name": "kanban",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "A beautiful Kanban board with project switching and iTerm2 integration",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -19,7 +19,6 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "dockview": "^4.13.1",
-    "electron-updater": "^6.7.3",
     "node-pty": "^1.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

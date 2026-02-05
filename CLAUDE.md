@@ -25,18 +25,16 @@ When updating the release:
    ```bash
    npm run build
    ```
-4. **Push commit:**
+4. **Push and create GitHub release:**
    ```bash
-   git push
-   ```
-5. **Create GitHub release and upload artifacts:**
-   ```bash
-   gh release create vX.X.X \
+   git push && gh release create vX.X.X \
      release/Kanban-X.X.X-arm64.dmg \
      release/Kanban-X.X.X-arm64-mac.zip \
      --title "vX.X.X" \
      --notes "Release notes here"
    ```
+
+Note: The app uses GitHub API to check for updates (no auto-update). Users must manually download and run `xattr -dr com.apple.quarantine /Applications/Kanban.app` after installation.
 
 ## Project Structure
 
