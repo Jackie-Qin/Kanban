@@ -126,6 +126,13 @@ declare global {
       // Search methods
       searchFiles: (projectPath: string, query: string) => Promise<SearchFileResult[]>
       searchText: (projectPath: string, query: string) => Promise<SearchTextResult[]>
+      // App Zoom methods
+      getAppZoom: () => Promise<number>
+      setAppZoom: (factor: number) => Promise<boolean>
+      // Terminal Settings methods
+      getTerminalSettings: () => Promise<{ terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string } | null>
+      saveTerminalSettings: (settings: { terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string }) => Promise<boolean>
+      onTerminalZoom: (callback: (direction: 'in' | 'out' | 'reset') => void) => () => void
     }
   }
 }

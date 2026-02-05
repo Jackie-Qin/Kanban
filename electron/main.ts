@@ -57,7 +57,15 @@ function saveData(data: unknown) {
 }
 
 // Settings management
-function loadSettings(): { autoSync: boolean } {
+interface AppSettings {
+  autoSync: boolean
+  terminalTheme?: string
+  terminalFontSize?: number
+  terminalFontFamily?: string
+  appZoomFactor?: number
+}
+
+function loadSettings(): AppSettings {
   ensureDataDir()
   if (fs.existsSync(SETTINGS_FILE)) {
     try {
@@ -70,7 +78,7 @@ function loadSettings(): { autoSync: boolean } {
   return { autoSync: false }
 }
 
-function saveSettings(settings: { autoSync: boolean }) {
+function saveSettings(settings: AppSettings) {
   ensureDataDir()
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2))
 }
@@ -214,6 +222,14 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+
+  // Restore saved app zoom factor
+  const savedSettings = loadSettings()
+  if (savedSettings.appZoomFactor && savedSettings.appZoomFactor !== 1) {
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow?.webContents.setZoomFactor(savedSettings.appZoomFactor!)
+    })
+  }
 }
 
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/Jackie-Qin/Kanban/releases/latest'
@@ -317,9 +333,21 @@ function createMenu() {
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        {
+          label: 'Terminal Zoom In',
+          accelerator: 'CmdOrCtrl+=',
+          click: () => { mainWindow?.webContents.send('terminal-zoom', 'in') }
+        },
+        {
+          label: 'Terminal Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          click: () => { mainWindow?.webContents.send('terminal-zoom', 'out') }
+        },
+        {
+          label: 'Terminal Reset Zoom',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => { mainWindow?.webContents.send('terminal-zoom', 'reset') }
+        },
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
@@ -413,6 +441,40 @@ ipcMain.handle('get-auto-sync', () => {
 
 ipcMain.handle('set-auto-sync', (_event, enabled: boolean) => {
   setAutoSync(enabled)
+  return true
+})
+
+// Terminal Settings Handlers
+ipcMain.handle('get-terminal-settings', () => {
+  const settings = loadSettings()
+  return {
+    terminalTheme: settings.terminalTheme,
+    terminalFontSize: settings.terminalFontSize,
+    terminalFontFamily: settings.terminalFontFamily
+  }
+})
+
+ipcMain.handle('save-terminal-settings', (_event, partial: { terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string }) => {
+  const settings = loadSettings()
+  if (partial.terminalTheme !== undefined) settings.terminalTheme = partial.terminalTheme
+  if (partial.terminalFontSize !== undefined) settings.terminalFontSize = partial.terminalFontSize
+  if (partial.terminalFontFamily !== undefined) settings.terminalFontFamily = partial.terminalFontFamily
+  saveSettings(settings)
+  return true
+})
+
+// App Zoom Handlers
+ipcMain.handle('get-app-zoom', () => {
+  return mainWindow?.webContents.getZoomFactor() ?? 1
+})
+
+ipcMain.handle('set-app-zoom', (_event, factor: number) => {
+  if (mainWindow) {
+    mainWindow.webContents.setZoomFactor(factor)
+    const settings = loadSettings()
+    settings.appZoomFactor = factor
+    saveSettings(settings)
+  }
   return true
 })
 

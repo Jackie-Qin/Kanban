@@ -1,5 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useStore } from '../store/useStore'
+import { electron } from '../lib/electron'
+import { useTerminalSettings } from '../store/useTerminalSettings'
+import { terminalThemes, FONT_FAMILIES, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../lib/terminalThemes'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -19,11 +22,26 @@ const PRESET_COLORS = [
 
 export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { labels, addLabel, updateLabel, deleteLabel } = useStore()
+  const { themeName, fontSize, fontFamily, setTheme, setFontSize, setFontFamily } = useTerminalSettings()
   const [newLabelName, setNewLabelName] = useState('')
   const [newLabelColor, setNewLabelColor] = useState(PRESET_COLORS[0])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState('')
+  const [zoomPercent, setZoomPercent] = useState(100)
+
+  // Load current app zoom on mount
+  useEffect(() => {
+    electron.getAppZoom().then((factor) => {
+      setZoomPercent(Math.round(factor * 100))
+    })
+  }, [])
+
+  const setAppZoom = useCallback((percent: number) => {
+    const clamped = Math.max(50, Math.min(200, percent))
+    setZoomPercent(clamped)
+    electron.setAppZoom(clamped / 100)
+  }, [])
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -102,7 +120,120 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
+        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+          {/* General section */}
+          <h3 className="text-sm font-medium text-dark-muted">General</h3>
+
+          <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
+            <span className="text-sm">App Zoom</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAppZoom(zoomPercent - 10)}
+                disabled={zoomPercent <= 50}
+                className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                </svg>
+              </button>
+              <span className="text-sm w-12 text-center font-mono">{zoomPercent}%</span>
+              <button
+                onClick={() => setAppZoom(zoomPercent + 10)}
+                disabled={zoomPercent >= 200}
+                className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+              {zoomPercent !== 100 && (
+                <button
+                  onClick={() => setAppZoom(100)}
+                  className="px-2 py-1 text-xs text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-dark-border" />
+
+          {/* Terminal section */}
+          <h3 className="text-sm font-medium text-dark-muted">Terminal</h3>
+
+          <div className="space-y-2">
+            {/* Theme */}
+            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
+              <span className="text-sm">Theme</span>
+              <div className="flex items-center gap-1.5">
+                {terminalThemes.map((t) => (
+                  <button
+                    key={t.name}
+                    onClick={() => setTheme(t.name)}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
+                      t.name === themeName
+                        ? 'bg-dark-hover text-dark-text ring-1 ring-dark-border'
+                        : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
+                    }`}
+                    title={t.name}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                      style={{ backgroundColor: t.theme.background as string }}
+                    />
+                    <span className="hidden sm:inline">{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Font Family */}
+            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
+              <span className="text-sm">Font</span>
+              <select
+                value={fontFamily}
+                onChange={(e) => setFontFamily(e.target.value)}
+                className="px-2 py-1 bg-dark-card border border-dark-border rounded text-sm outline-none focus:border-blue-500 text-dark-text"
+              >
+                {FONT_FAMILIES.map((f) => (
+                  <option key={f.value} value={f.value}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Font Size */}
+            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
+              <span className="text-sm">Font Size</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setFontSize(fontSize - 1)}
+                  disabled={fontSize <= MIN_FONT_SIZE}
+                  className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                  </svg>
+                </button>
+                <span className="text-sm w-8 text-center font-mono">{fontSize}</span>
+                <button
+                  onClick={() => setFontSize(fontSize + 1)}
+                  disabled={fontSize >= MAX_FONT_SIZE}
+                  className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-dark-border" />
+
+          {/* Labels section */}
           <h3 className="text-sm font-medium text-dark-muted">Labels</h3>
 
           {/* Existing labels */}

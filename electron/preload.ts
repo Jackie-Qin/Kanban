@@ -177,5 +177,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchFiles: (projectPath: string, query: string): Promise<{ path: string; name: string; relativePath: string }[]> =>
     ipcRenderer.invoke('search-files', projectPath, query),
   searchText: (projectPath: string, query: string): Promise<{ path: string; relativePath: string; line: number; content: string }[]> =>
-    ipcRenderer.invoke('search-text', projectPath, query)
+    ipcRenderer.invoke('search-text', projectPath, query),
+
+  // App Zoom methods
+  getAppZoom: (): Promise<number> => ipcRenderer.invoke('get-app-zoom'),
+  setAppZoom: (factor: number): Promise<boolean> => ipcRenderer.invoke('set-app-zoom', factor),
+
+  // Terminal Settings methods
+  getTerminalSettings: (): Promise<{ terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string } | null> =>
+    ipcRenderer.invoke('get-terminal-settings'),
+  saveTerminalSettings: (settings: { terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string }): Promise<boolean> =>
+    ipcRenderer.invoke('save-terminal-settings', settings),
+  onTerminalZoom: (callback: (direction: 'in' | 'out' | 'reset') => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, direction: 'in' | 'out' | 'reset') => {
+      callback(direction)
+    }
+    ipcRenderer.on('terminal-zoom', listener)
+    return () => ipcRenderer.removeListener('terminal-zoom', listener)
+  }
 })

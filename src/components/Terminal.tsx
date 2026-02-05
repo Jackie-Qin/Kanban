@@ -1,7 +1,10 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { electron } from '../lib/electron'
+import { useTerminalSettings } from '../store/useTerminalSettings'
+import { getThemeByName } from '../lib/terminalThemes'
 
 interface TerminalProps {
   terminalId: string
@@ -20,6 +23,7 @@ export default function Terminal({
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const ptyCreatedRef = useRef(false)
+  const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
   // Fit terminal to container
   const fitTerminal = useCallback(() => {
@@ -41,6 +45,7 @@ export default function Terminal({
     }
   }, [terminalId])
 
+  // Main initialization — themeName/fontSize intentionally excluded from deps
   useEffect(() => {
     const container = terminalRef.current
     if (!container) return
@@ -48,49 +53,37 @@ export default function Terminal({
     // Clear container in case of remount
     container.innerHTML = ''
 
+    // Read current settings at init time
+    const state = useTerminalSettings.getState()
+    const initTheme = getThemeByName(state.themeName)
 
-    // Initialize xterm with dark gray theme
+    // Initialize xterm
     const xterm = new XTerm({
       cursorBlink: true,
       cursorStyle: 'bar',
-      fontSize: 13,
-      fontFamily: 'Menlo, Monaco, "SF Mono", "Fira Code", Consolas, monospace',
-      fontWeight: '400',
-      fontWeightBold: '600',
-      lineHeight: 1.2,
+      fontSize: state.fontSize,
+      fontFamily: `"${state.fontFamily}", Monaco, Menlo, monospace`,
+      fontWeight: '500',
+      fontWeightBold: '700',
+      lineHeight: 1.0,
       letterSpacing: 0,
-      allowTransparency: true,
-      theme: {
-        // Dark gray theme
-        background: '#1a1a1a',
-        foreground: '#e0e0e0',
-        cursor: '#e0e0e0',
-        cursorAccent: '#1a1a1a',
-        selectionBackground: '#404040',
-        selectionForeground: '#ffffff',
-        // ANSI colors
-        black: '#1a1a1a',
-        red: '#f44747',
-        green: '#4ec9b0',
-        yellow: '#dcdcaa',
-        blue: '#569cd6',
-        magenta: '#c586c0',
-        cyan: '#4ec9b0',
-        white: '#e0e0e0',
-        brightBlack: '#666666',
-        brightRed: '#f44747',
-        brightGreen: '#4ec9b0',
-        brightYellow: '#dcdcaa',
-        brightBlue: '#569cd6',
-        brightMagenta: '#c586c0',
-        brightCyan: '#4ec9b0',
-        brightWhite: '#ffffff'
-      }
+      theme: initTheme.theme
     })
 
     const fitAddon = new FitAddon()
     xterm.loadAddon(fitAddon)
     xterm.open(container)
+
+    // WebGL renderer: renders block/box characters as filled rects (no gaps)
+    try {
+      const webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose()
+      })
+      xterm.loadAddon(webglAddon)
+    } catch {
+      // Falls back to canvas renderer if WebGL unavailable
+    }
 
     xtermRef.current = xterm
     fitAddonRef.current = fitAddon
@@ -158,6 +151,18 @@ export default function Terminal({
     }
   }, [terminalId, projectPath, fitTerminal])
 
+  // Live-update theme, fontSize, fontFamily without recreating xterm/PTY
+  useEffect(() => {
+    const xterm = xtermRef.current
+    if (!xterm) return
+    const t = getThemeByName(themeName)
+    xterm.options.theme = t.theme
+    xterm.options.fontSize = fontSize
+    xterm.options.fontFamily = `"${fontFamily}", Monaco, Menlo, monospace`
+    // Re-fit after font change so cols/rows update
+    requestAnimationFrame(fitTerminal)
+  }, [themeName, fontSize, fontFamily, fitTerminal])
+
   // Focus when active
   useEffect(() => {
     if (isActive && xtermRef.current) {
@@ -166,6 +171,8 @@ export default function Terminal({
     }
   }, [isActive, fitTerminal])
 
+  const bgColor = getThemeByName(themeName).theme.background || '#14191e'
+
   return (
     <div
       className="h-full w-full flex flex-col min-h-0"
@@ -173,10 +180,11 @@ export default function Terminal({
     >
       <div
         ref={terminalRef}
-        className="flex-1 min-h-0 w-full bg-dark-bg"
+        className="flex-1 min-h-0 w-full"
         style={{
           padding: '8px 12px',
-          minHeight: '100px'
+          minHeight: '100px',
+          backgroundColor: bgColor
         }}
       />
     </div>

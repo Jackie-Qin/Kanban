@@ -9,6 +9,7 @@ import SearchModal from './components/SearchModal'
 import UpdateNotification from './components/UpdateNotification'
 import { Task } from './types'
 import { electron } from './lib/electron'
+import { useTerminalSettings } from './store/useTerminalSettings'
 
 type SearchMode = 'files' | 'text'
 type SelectedTask = { task: Task; isNew?: boolean } | null
@@ -19,10 +20,22 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [selectedTask, setSelectedTask] = useState<SelectedTask>(null)
   const [searchMode, setSearchMode] = useState<SearchMode | null>(null)
+  const { zoomIn, zoomOut, resetZoom, loadSettings: loadTerminalSettings } = useTerminalSettings()
 
   useEffect(() => {
     loadData()
-  }, [loadData])
+    loadTerminalSettings()
+  }, [loadData, loadTerminalSettings])
+
+  // Listen for terminal zoom IPC from menu
+  useEffect(() => {
+    const unsubscribe = electron.onTerminalZoom((direction) => {
+      if (direction === 'in') zoomIn()
+      else if (direction === 'out') zoomOut()
+      else if (direction === 'reset') resetZoom()
+    })
+    return unsubscribe
+  }, [zoomIn, zoomOut, resetZoom])
 
   // Listen for external file changes (auto-sync)
   useEffect(() => {
