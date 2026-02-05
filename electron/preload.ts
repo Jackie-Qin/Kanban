@@ -134,6 +134,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gitPull: (projectPath: string): Promise<boolean> =>
     ipcRenderer.invoke('git-pull', projectPath),
 
+  // Auto Sync methods
+  getAutoSync: (): Promise<boolean> => ipcRenderer.invoke('get-auto-sync'),
+  setAutoSync: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('set-auto-sync', enabled),
+  onDataFileChanged: (callback: () => void) => {
+    const listener = () => {
+      callback()
+    }
+    ipcRenderer.on('data-file-changed', listener)
+    return () => ipcRenderer.removeListener('data-file-changed', listener)
+  },
+
   // Update methods
   updateCheck: () => ipcRenderer.invoke('update-check'),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),

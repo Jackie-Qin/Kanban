@@ -7,6 +7,12 @@ import { createPty, writePty, resizePty, killPty, killAllPty } from './pty'
 
 const DATA_DIR = path.join(app.getPath('home'), '.kanban')
 const DATA_FILE = path.join(DATA_DIR, 'data.json')
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json')
+
+// Auto-sync state
+let autoSyncEnabled = false
+let fileWatcher: fs.FSWatcher | null = null
+let lastSaveTime = 0 // Track when we last saved to avoid reload loops
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -39,7 +45,84 @@ function loadData() {
 
 function saveData(data: unknown) {
   ensureDataDir()
+  lastSaveTime = Date.now()
+  console.log('Saving data to:', DATA_FILE)
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2))
+  console.log('Data saved successfully')
+}
+
+// Settings management
+function loadSettings(): { autoSync: boolean } {
+  ensureDataDir()
+  if (fs.existsSync(SETTINGS_FILE)) {
+    try {
+      const content = fs.readFileSync(SETTINGS_FILE, 'utf-8')
+      return JSON.parse(content)
+    } catch {
+      return { autoSync: false }
+    }
+  }
+  return { autoSync: false }
+}
+
+function saveSettings(settings: { autoSync: boolean }) {
+  ensureDataDir()
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2))
+}
+
+// File watcher for auto-sync
+let fileWatchDebounce: NodeJS.Timeout | null = null
+
+function startFileWatcher() {
+  if (fileWatcher) return
+
+  fileWatcher = fs.watch(DATA_FILE, (eventType) => {
+    if (eventType === 'change') {
+      // Ignore changes we made ourselves (within last 500ms)
+      if (Date.now() - lastSaveTime < 500) return
+
+      // Debounce to avoid rapid reloads
+      if (fileWatchDebounce) clearTimeout(fileWatchDebounce)
+      fileWatchDebounce = setTimeout(() => {
+        console.log('Auto-sync: File changed externally, notifying renderer')
+        mainWindow?.webContents.send('data-file-changed')
+      }, 100)
+    }
+  })
+}
+
+function stopFileWatcher() {
+  if (fileWatcher) {
+    fileWatcher.close()
+    fileWatcher = null
+  }
+}
+
+function setAutoSync(enabled: boolean) {
+  autoSyncEnabled = enabled
+  saveSettings({ autoSync: enabled })
+
+  if (enabled) {
+    startFileWatcher()
+  } else {
+    stopFileWatcher()
+  }
+
+  // Update menu checkmark
+  updateAutoSyncMenu()
+}
+
+function updateAutoSyncMenu() {
+  const menu = Menu.getApplicationMenu()
+  if (menu) {
+    const editMenu = menu.items.find(item => item.label === 'Edit')
+    if (editMenu?.submenu) {
+      const autoSyncItem = editMenu.submenu.items.find(item => item.label === 'Auto Sync')
+      if (autoSyncItem) {
+        autoSyncItem.checked = autoSyncEnabled
+      }
+    }
+  }
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -147,7 +230,17 @@ function createMenu() {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
-        { role: 'selectAll' }
+        { role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Auto Sync',
+          type: 'checkbox',
+          checked: autoSyncEnabled,
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: (menuItem) => {
+            setAutoSync(menuItem.checked)
+          }
+        }
       ]
     },
     {
@@ -197,8 +290,17 @@ function createMenu() {
 }
 
 app.whenReady().then(() => {
+  // Load settings and initialize auto-sync
+  const settings = loadSettings()
+  autoSyncEnabled = settings.autoSync
+
   createMenu()
   createWindow()
+
+  // Start file watcher if auto-sync was enabled
+  if (autoSyncEnabled) {
+    startFileWatcher()
+  }
 
   // Check for updates on startup (production only)
   if (!process.env.VITE_DEV_SERVER_URL) {
@@ -223,6 +325,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   killAllPty()
+  stopFileWatcher()
 })
 
 // IPC Handlers
@@ -232,6 +335,16 @@ ipcMain.handle('load-data', () => {
 
 ipcMain.handle('save-data', (_event, data) => {
   saveData(data)
+  return true
+})
+
+// Auto Sync Handlers
+ipcMain.handle('get-auto-sync', () => {
+  return autoSyncEnabled
+})
+
+ipcMain.handle('set-auto-sync', (_event, enabled: boolean) => {
+  setAutoSync(enabled)
   return true
 })
 

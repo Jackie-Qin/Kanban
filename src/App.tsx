@@ -8,6 +8,7 @@ import SettingsModal from './components/SettingsModal'
 import SearchModal from './components/SearchModal'
 import UpdateNotification from './components/UpdateNotification'
 import { Task } from './types'
+import { electron } from './lib/electron'
 
 type SearchMode = 'files' | 'text'
 type SelectedTask = { task: Task; isNew?: boolean } | null
@@ -21,6 +22,15 @@ export default function App() {
 
   useEffect(() => {
     loadData()
+  }, [loadData])
+
+  // Listen for external file changes (auto-sync)
+  useEffect(() => {
+    const unsubscribe = electron.onDataFileChanged(() => {
+      console.log('Data file changed externally, reloading...')
+      loadData()
+    })
+    return unsubscribe
   }, [loadData])
 
   const activeProject = projects.find((p) => p.id === activeProjectId)

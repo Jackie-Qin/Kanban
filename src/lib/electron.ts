@@ -106,6 +106,10 @@ declare global {
       gitCommit: (projectPath: string, message: string) => Promise<boolean>
       gitPush: (projectPath: string) => Promise<boolean>
       gitPull: (projectPath: string) => Promise<boolean>
+      // Auto Sync methods
+      getAutoSync: () => Promise<boolean>
+      setAutoSync: (enabled: boolean) => Promise<boolean>
+      onDataFileChanged: (callback: () => void) => () => void
       // Update methods
       updateCheck: () => Promise<void>
       updateDownload: () => Promise<void>

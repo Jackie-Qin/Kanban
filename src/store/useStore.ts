@@ -5,6 +5,7 @@ import { electron } from '../lib/electron'
 
 interface AppState extends AppData {
   isLoading: boolean
+  isSyncing: boolean // Prevents saves during reload
   closedProjectIds: string[]
   loadData: () => Promise<void>
   saveData: () => Promise<void>
@@ -42,8 +43,11 @@ export const useStore = create<AppState>((set, get) => ({
   closedProjectIds: [],
   layouts: {},
   isLoading: true,
+  isSyncing: false,
 
   loadData: async () => {
+    // Set syncing flag to prevent saves during reload
+    set({ isSyncing: true })
     try {
       const data = await electron.loadData()
       set({
@@ -53,18 +57,28 @@ export const useStore = create<AppState>((set, get) => ({
         activeProjectId: data.activeProjectId,
         closedProjectIds: data.closedProjectIds || [],
         layouts: data.layouts || {},
-        isLoading: false
+        isLoading: false,
+        isSyncing: false
       })
     } catch (error) {
       console.error('Failed to load data:', error)
-      set({ isLoading: false })
+      set({ isLoading: false, isSyncing: false })
     }
   },
 
   saveData: async () => {
-    const { projects, tasks, labels, activeProjectId, closedProjectIds, layouts } = get()
+    // Don't save while syncing to prevent race conditions
+    const { isSyncing, projects, tasks, labels, activeProjectId, closedProjectIds, layouts } = get()
+    if (isSyncing) {
+      console.log('Skipping save during sync')
+      return
+    }
     try {
-      await electron.saveData({ projects, tasks, labels, activeProjectId, closedProjectIds, layouts })
+      // Sanitize data to ensure it's serializable (layouts can contain non-cloneable objects)
+      const sanitizedData = JSON.parse(JSON.stringify({
+        projects, tasks, labels, activeProjectId, closedProjectIds, layouts
+      }))
+      await electron.saveData(sanitizedData)
     } catch (error) {
       console.error('Failed to save data:', error)
     }
