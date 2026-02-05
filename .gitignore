@@ -28,3 +28,6 @@ npm-debug.log*
 # Local data
 kanban-data.json
 release/mac-arm64/
+
+# Documentation
+docs/

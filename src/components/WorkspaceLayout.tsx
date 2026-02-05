@@ -244,10 +244,34 @@ export default function WorkspaceLayout({
   // Get panels that aren't currently open
   const closedPanels = PANEL_OPTIONS.filter((p) => !openPanelIds.includes(p.id))
 
+  // Handle project changes - update non-terminal panels
+  useEffect(() => {
+    if (!apiRef.current) return
+
+    // Update params for each panel except terminal (to preserve terminal sessions)
+    const kanbanPanel = apiRef.current.getPanel('kanban')
+    const editorPanel = apiRef.current.getPanel('editor')
+    const gitPanel = apiRef.current.getPanel('git')
+    const directoryPanel = apiRef.current.getPanel('directory')
+
+    if (kanbanPanel) {
+      kanbanPanel.update({ params: { projectId, projectPath, onTaskClick } })
+    }
+    if (editorPanel) {
+      editorPanel.update({ params: { projectId, projectPath } })
+    }
+    if (gitPanel) {
+      gitPanel.update({ params: { projectId, projectPath } })
+    }
+    if (directoryPanel) {
+      directoryPanel.update({ params: { projectId, projectPath } })
+    }
+    // Note: Terminal panel is NOT updated to preserve terminal sessions across project switches
+  }, [projectId, projectPath, onTaskClick])
+
   return (
     <div className="h-full w-full relative" onContextMenu={handleContextMenu}>
       <DockviewReact
-        key={projectId}
         components={components}
         onReady={onReady}
         className="dockview-theme-dark"
