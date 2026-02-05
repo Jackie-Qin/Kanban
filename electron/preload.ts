@@ -126,5 +126,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
     ipcRenderer.on('update-status', listener)
     return () => ipcRenderer.removeListener('update-status', listener)
-  }
+  },
+
+  // Shell methods
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url)
 })

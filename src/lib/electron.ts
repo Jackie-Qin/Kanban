@@ -88,6 +88,8 @@ declare global {
       updateInstall: () => Promise<void>
       getAppVersion: () => Promise<string>
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
+      // Shell methods
+      openExternal: (url: string) => Promise<void>
     }
   }
 }

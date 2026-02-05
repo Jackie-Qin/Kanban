@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import fs from 'fs'
@@ -231,6 +231,10 @@ ipcMain.handle('update-install', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion()
+})
+
+ipcMain.handle('open-external', (_event, url: string) => {
+  shell.openExternal(url)
 })
 
 ipcMain.handle('open-iterm', (_event, projectPath: string) => {
