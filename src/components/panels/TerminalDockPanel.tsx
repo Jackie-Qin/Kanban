@@ -28,6 +28,18 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
     const [activeTerminalId, setActiveTerminalId] = useState(`${projectId}-term-1`)
     const [isSplitView, setIsSplitView] = useState(false)
     const terminalsRef = useRef(terminals)
+    const currentProjectIdRef = useRef(projectId)
+
+    // Reset terminals when project changes
+    useEffect(() => {
+      if (currentProjectIdRef.current !== projectId) {
+        currentProjectIdRef.current = projectId
+        const newTerminals = [{ id: `${projectId}-term-1`, name: 'Terminal 1' }]
+        setTerminals(newTerminals)
+        setActiveTerminalId(`${projectId}-term-1`)
+        setIsSplitView(false)
+      }
+    }, [projectId])
 
     // Keep ref in sync with state for keyboard handler
     useEffect(() => {

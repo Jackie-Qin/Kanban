@@ -244,15 +244,16 @@ export default function WorkspaceLayout({
   // Get panels that aren't currently open
   const closedPanels = PANEL_OPTIONS.filter((p) => !openPanelIds.includes(p.id))
 
-  // Handle project changes - update non-terminal panels
+  // Handle project changes - update all panels including terminal
   useEffect(() => {
     if (!apiRef.current) return
 
-    // Update params for each panel except terminal (to preserve terminal sessions)
+    // Update params for each panel
     const kanbanPanel = apiRef.current.getPanel('kanban')
     const editorPanel = apiRef.current.getPanel('editor')
     const gitPanel = apiRef.current.getPanel('git')
     const directoryPanel = apiRef.current.getPanel('directory')
+    const terminalPanel = apiRef.current.getPanel('terminal')
 
     if (kanbanPanel) {
       kanbanPanel.update({ params: { projectId, projectPath, onTaskClick } })
@@ -266,7 +267,9 @@ export default function WorkspaceLayout({
     if (directoryPanel) {
       directoryPanel.update({ params: { projectId, projectPath } })
     }
-    // Note: Terminal panel is NOT updated to preserve terminal sessions across project switches
+    if (terminalPanel) {
+      terminalPanel.update({ params: { projectId, projectPath } })
+    }
   }, [projectId, projectPath, onTaskClick])
 
   return (
