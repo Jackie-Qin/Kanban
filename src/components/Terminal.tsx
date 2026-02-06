@@ -207,6 +207,24 @@ export default function Terminal({
       }
     })
 
+    // Intercept app-level shortcuts so xterm doesn't consume them
+    xterm.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && e.metaKey) {
+        // Cmd+K: clear terminal
+        if (e.key === 'k') {
+          e.preventDefault()
+          xterm.clear()
+          xterm.scrollToBottom()
+          return false
+        }
+        // Cmd+Left/Right: let App handle project switching
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+          return false
+        }
+      }
+      return true
+    })
+
     // Send input to PTY
     const dataDisposable = xterm.onData((data) => {
       if (ptyCreatedRef.current) {
@@ -313,14 +331,12 @@ export default function Terminal({
     requestAnimationFrame(fitTerminal)
   }, [themeName, fontSize, fontFamily, fitTerminal])
 
-  // Focus when active — fit then scroll to bottom so latest output is visible
+  // Focus when active — fitTerminal handles fit + deferred scroll to bottom
   useEffect(() => {
     if (isActive && xtermRef.current) {
       xtermRef.current.focus()
       requestAnimationFrame(() => {
         fitTerminal()
-        // Scroll to bottom after fit to avoid viewport resetting to top
-        xtermRef.current?.scrollToBottom()
       })
     }
   }, [isActive, fitTerminal])
