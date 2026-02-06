@@ -33,6 +33,20 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
     // Store terminal state for ALL projects to keep them alive across switches
     const [projectStates, setProjectStates] = useState<Record<string, ProjectTerminalState>>({})
     const terminalsRef = useRef<TerminalInfo[]>([])
+    const persistedStatesRef = useRef<Record<string, { terminals: { id: string; name: string }[]; activeTerminalId: string; isSplitView: boolean }> | null>(null)
+    const initializedRef = useRef(false)
+    const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    // Load persisted terminal states once on mount
+    useEffect(() => {
+      electron.getTerminalStates().then(states => {
+        persistedStatesRef.current = states
+        initializedRef.current = true
+      }).catch(() => {
+        persistedStatesRef.current = {}
+        initializedRef.current = true
+      })
+    }, [])
 
     // Initialize or update state for current project
     useEffect(() => {
@@ -47,6 +61,21 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
           }
           return prev
         }
+
+        // Check persisted state first
+        const persisted = persistedStatesRef.current?.[projectId]
+        if (persisted) {
+          return {
+            ...prev,
+            [projectId]: {
+              terminals: persisted.terminals,
+              activeTerminalId: persisted.activeTerminalId,
+              isSplitView: persisted.isSplitView,
+              projectPath
+            }
+          }
+        }
+
         // Initialize new project with default terminal
         return {
           ...prev,
@@ -59,6 +88,32 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
         }
       })
     }, [projectId, projectPath])
+
+    // Debounced save of terminal states to disk
+    useEffect(() => {
+      if (!initializedRef.current) return
+
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+      saveTimeoutRef.current = setTimeout(() => {
+        const statesToSave: Record<string, { terminals: { id: string; name: string }[]; activeTerminalId: string; isSplitView: boolean }> = {}
+        for (const [pid, state] of Object.entries(projectStates)) {
+          statesToSave[pid] = {
+            terminals: state.terminals,
+            activeTerminalId: state.activeTerminalId,
+            isSplitView: state.isSplitView
+          }
+        }
+        electron.saveTerminalStates(statesToSave)
+      }, 500)
+
+      return () => {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current)
+        }
+      }
+    }, [projectStates])
 
     // Get current project's state (with fallback for initial render)
     const currentState = projectStates[projectId] || {

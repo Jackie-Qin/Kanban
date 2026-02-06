@@ -194,5 +194,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
     ipcRenderer.on('terminal-zoom', listener)
     return () => ipcRenderer.removeListener('terminal-zoom', listener)
-  }
+  },
+
+  // Image / File helpers
+  findClaudeImage: (imageNumber: number): Promise<string | null> =>
+    ipcRenderer.invoke('find-claude-image', imageNumber),
+  fsReadFileBase64: (filePath: string): Promise<string | null> =>
+    ipcRenderer.invoke('fs-read-file-base64', filePath),
+
+  // Terminal State Persistence methods
+  getTerminalStates: (): Promise<Record<string, { terminals: { id: string; name: string }[]; activeTerminalId: string; isSplitView: boolean }>> =>
+    ipcRenderer.invoke('get-terminal-states'),
+  saveTerminalStates: (states: Record<string, { terminals: { id: string; name: string }[]; activeTerminalId: string; isSplitView: boolean }>): Promise<boolean> =>
+    ipcRenderer.invoke('save-terminal-states', states),
+  deleteTerminalState: (projectId: string): Promise<boolean> =>
+    ipcRenderer.invoke('delete-terminal-state', projectId),
+  saveTerminalBuffer: (terminalId: string, content: string): Promise<boolean> =>
+    ipcRenderer.invoke('save-terminal-buffer', terminalId, content),
+  loadTerminalBuffer: (terminalId: string): Promise<string | null> =>
+    ipcRenderer.invoke('load-terminal-buffer', terminalId),
+  deleteTerminalBuffers: (projectId: string): Promise<boolean> =>
+    ipcRenderer.invoke('delete-terminal-buffers', projectId)
 })

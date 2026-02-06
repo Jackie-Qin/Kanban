@@ -133,6 +133,16 @@ declare global {
       getTerminalSettings: () => Promise<{ terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string } | null>
       saveTerminalSettings: (settings: { terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string }) => Promise<boolean>
       onTerminalZoom: (callback: (direction: 'in' | 'out' | 'reset') => void) => () => void
+      // Image / File helpers
+      findClaudeImage: (imageNumber: number) => Promise<string | null>
+      fsReadFileBase64: (filePath: string) => Promise<string | null>
+      // Terminal State Persistence methods
+      getTerminalStates: () => Promise<Record<string, { terminals: { id: string; name: string }[]; activeTerminalId: string; isSplitView: boolean }>>
+      saveTerminalStates: (states: Record<string, { terminals: { id: string; name: string }[]; activeTerminalId: string; isSplitView: boolean }>) => Promise<boolean>
+      deleteTerminalState: (projectId: string) => Promise<boolean>
+      saveTerminalBuffer: (terminalId: string, content: string) => Promise<boolean>
+      loadTerminalBuffer: (terminalId: string) => Promise<string | null>
+      deleteTerminalBuffers: (projectId: string) => Promise<boolean>
     }
   }
 }

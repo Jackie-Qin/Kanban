@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import { electron } from '../lib/electron'
 import { useTerminalSettings } from '../store/useTerminalSettings'
 import { getThemeByName } from '../lib/terminalThemes'
@@ -23,6 +24,7 @@ export default function Terminal({
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
+  const serializeAddonRef = useRef<SerializeAddon | null>(null)
   const ptyCreatedRef = useRef(false)
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
@@ -88,8 +90,106 @@ export default function Terminal({
       // Falls back to canvas renderer if WebGL unavailable
     }
 
+    // Serialize addon for buffer persistence
+    const serializeAddon = new SerializeAddon()
+    xterm.loadAddon(serializeAddon)
+    serializeAddonRef.current = serializeAddon
+
     xtermRef.current = xterm
     fitAddonRef.current = fitAddon
+
+    // Link provider: clickable [Image #N] references
+    const imageLinkDisposable = xterm.registerLinkProvider({
+      provideLinks(bufferLineNumber: number, callback) {
+        const line = xterm.buffer.active.getLine(bufferLineNumber - 1)
+        if (!line) { callback(undefined); return }
+        const text = line.translateToString()
+
+        const regex = /\[Image\s*#(\d+)\]/g
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const links: any[] = []
+        let match
+        while ((match = regex.exec(text)) !== null) {
+          const startX = match.index + 1
+          const endX = startX + match[0].length - 1
+          const imageNum = parseInt(match[1], 10)
+          links.push({
+            range: { start: { x: startX, y: bufferLineNumber }, end: { x: endX, y: bufferLineNumber } },
+            text: match[0],
+            decorations: { pointerCursor: true, underline: true },
+            activate: async () => {
+              const imagePath = await electron.findClaudeImage(imageNum)
+              if (imagePath) {
+                window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { path: imagePath, preview: true } }))
+                window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+              }
+            }
+          })
+        }
+        callback(links.length > 0 ? links : undefined)
+      }
+    })
+
+    // Link provider: clickable file paths (quoted and unquoted)
+    const filePathLinkDisposable = xterm.registerLinkProvider({
+      provideLinks(bufferLineNumber: number, callback) {
+        const line = xterm.buffer.active.getLine(bufferLineNumber - 1)
+        if (!line) { callback(undefined); return }
+        const text = line.translateToString()
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const links: any[] = []
+
+        // 1. Quoted paths: '/path/to/file' or "/path/to/file"
+        const quotedRegex = /(['"])(\/[^'"]*?)\1/g
+        let match
+        while ((match = quotedRegex.exec(text)) !== null) {
+          const filePath = match[2]
+          const startX = match.index + 1 // include the opening quote
+          const endX = startX + match[0].length - 1
+          links.push({
+            range: { start: { x: startX, y: bufferLineNumber }, end: { x: endX, y: bufferLineNumber } },
+            text: filePath,
+            decorations: { pointerCursor: true, underline: true },
+            activate: async () => {
+              const exists = await electron.fsExists(filePath)
+              if (exists) {
+                window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { path: filePath, preview: true } }))
+                window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+              }
+            }
+          })
+        }
+
+        // 2. Unquoted absolute paths (must contain at least 2 slashes)
+        const unquotedRegex = /(?:^|(?<=\s))(\/[\w.\-]+(?:\/[\w.\-\u0080-\uffff]+)+)/g
+        while ((match = unquotedRegex.exec(text)) !== null) {
+          const filePath = match[1]
+          const startX = match.index + (match[0].length - match[1].length) + 1
+          const endX = startX + filePath.length - 1
+          // Skip if overlapping with a quoted link
+          const overlaps = links.some((l: { range: { start: { x: number }; end: { x: number } } }) =>
+            !(endX < l.range.start.x || startX > l.range.end.x)
+          )
+          if (!overlaps) {
+            links.push({
+              range: { start: { x: startX, y: bufferLineNumber }, end: { x: endX, y: bufferLineNumber } },
+              text: filePath,
+              decorations: { pointerCursor: true, underline: true },
+              activate: async () => {
+                const exists = await electron.fsExists(filePath)
+                if (exists) {
+                  window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { path: filePath, preview: true } }))
+                  window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+                }
+              }
+            })
+          }
+        }
+
+        callback(links.length > 0 ? links : undefined)
+      }
+    })
 
     // Listen for PTY data
     const unsubscribeData = electron.onPtyData(({ terminalId: tid, data }) => {
@@ -112,10 +212,21 @@ export default function Terminal({
       }
     })
 
-    // Fit and create PTY after render
+    // Fit, restore buffer, and create PTY after render
     const initTimeout = setTimeout(async () => {
       if (fitAddonRef.current && xtermRef.current) {
         fitAddonRef.current.fit()
+
+        // Restore saved buffer before creating PTY
+        try {
+          const savedBuffer = await electron.loadTerminalBuffer(terminalId)
+          if (savedBuffer && xtermRef.current) {
+            xtermRef.current.write(savedBuffer)
+            xtermRef.current.write('\r\n\x1b[90m--- Session restored ---\x1b[0m\r\n')
+          }
+        } catch {
+          // Ignore buffer restore errors
+        }
 
         // Create PTY
         if (!ptyCreatedRef.current) {
@@ -123,7 +234,7 @@ export default function Terminal({
 
           if (success) {
             ptyCreatedRef.current = true
-            electron.ptyResize(terminalId, xtermRef.current.cols, xtermRef.current.rows)
+            electron.ptyResize(terminalId, xtermRef.current!.cols, xtermRef.current!.rows)
           }
         }
       }
@@ -141,6 +252,20 @@ export default function Terminal({
       unsubscribeData()
       unsubscribeExit()
       dataDisposable.dispose()
+      imageLinkDisposable.dispose()
+      filePathLinkDisposable.dispose()
+
+      // Serialize buffer before disposing
+      if (serializeAddonRef.current && xterm) {
+        try {
+          const serialized = serializeAddonRef.current.serialize()
+          if (serialized) {
+            electron.saveTerminalBuffer(terminalId, serialized)
+          }
+        } catch {
+          // Ignore serialize errors
+        }
+      }
 
       // Only kill PTY if it was created
       if (ptyCreatedRef.current) {
@@ -154,6 +279,7 @@ export default function Terminal({
         webglAddonRef.current = null
       }
 
+      serializeAddonRef.current = null
       try { xterm.dispose() } catch { /* xterm already disposed */ }
       xtermRef.current = null
       fitAddonRef.current = null
@@ -172,11 +298,15 @@ export default function Terminal({
     requestAnimationFrame(fitTerminal)
   }, [themeName, fontSize, fontFamily, fitTerminal])
 
-  // Focus when active
+  // Focus when active — fit then scroll to bottom so latest output is visible
   useEffect(() => {
     if (isActive && xtermRef.current) {
       xtermRef.current.focus()
-      requestAnimationFrame(fitTerminal)
+      requestAnimationFrame(() => {
+        fitTerminal()
+        // Scroll to bottom after fit to avoid viewport resetting to top
+        xtermRef.current?.scrollToBottom()
+      })
     }
   }, [isActive, fitTerminal])
 

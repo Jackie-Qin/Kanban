@@ -109,6 +109,10 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   deleteProject: (id) => {
+    // Clean up persisted terminal state and buffers
+    electron.deleteTerminalState(id)
+    electron.deleteTerminalBuffers(id)
+
     set((state) => {
       const newProjects = state.projects.filter((p) => p.id !== id)
       const newTasks = state.tasks.filter((t) => t.projectId !== id)

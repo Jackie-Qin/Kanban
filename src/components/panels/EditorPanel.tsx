@@ -9,6 +9,13 @@ interface EditorPanelParams {
   projectPath: string
 }
 
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
+
+function isImageFile(filename: string): boolean {
+  const ext = '.' + (filename.split('.').pop()?.toLowerCase() || '')
+  return IMAGE_EXTENSIONS.has(ext)
+}
+
 interface OpenFile {
   path: string
   name: string
@@ -17,6 +24,8 @@ interface OpenFile {
   isPreview: boolean
   isModified: boolean
   showDiff: boolean
+  isImage?: boolean
+  imageDataUrl?: string
   gitOriginal?: string // Content from git HEAD for diff view
 }
 
@@ -183,14 +192,47 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
         return
       }
 
+      const name = filePath.split('/').pop() || filePath
+
+      // Handle image files
+      if (isImageFile(name)) {
+        const dataUrl = await electron.fsReadFileBase64(filePath)
+        if (!dataUrl) {
+          console.error('Failed to read image:', filePath)
+          return
+        }
+        const newFile: OpenFile = {
+          path: filePath,
+          name,
+          content: '',
+          originalContent: '',
+          isPreview,
+          isModified: false,
+          showDiff: false,
+          isImage: true,
+          imageDataUrl: dataUrl
+        }
+        setOpenFiles((prev) => {
+          if (isPreview) {
+            const previewIndex = prev.findIndex((f) => f.isPreview)
+            if (previewIndex !== -1) {
+              const newFiles = [...prev]
+              newFiles[previewIndex] = newFile
+              return newFiles
+            }
+          }
+          return [...prev, newFile]
+        })
+        setActiveFilePath(filePath)
+        return
+      }
+
       // Load file content
       const content = await electron.fsReadFile(filePath)
       if (content === null) {
         console.error('Failed to read file:', filePath)
         return
       }
-
-      const name = filePath.split('/').pop() || filePath
 
       // If showing diff, get the original from git HEAD
       let gitOriginal: string | undefined
@@ -446,7 +488,16 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
       {/* Editor area */}
       <div className="flex-1 min-h-0">
         {activeFile ? (
-          activeFile.showDiff && activeFile.gitOriginal !== undefined ? (
+          activeFile.isImage && activeFile.imageDataUrl ? (
+            <div className="h-full flex items-center justify-center overflow-auto bg-[#1a1a1a] p-8">
+              <img
+                src={activeFile.imageDataUrl}
+                alt={activeFile.name}
+                className="max-w-full max-h-full object-contain rounded"
+                style={{ imageRendering: 'auto' }}
+              />
+            </div>
+          ) : activeFile.showDiff && activeFile.gitOriginal !== undefined ? (
             <div className="h-full">
               <DiffEditor
                 height="100%"

@@ -57,12 +57,19 @@ function saveData(data: unknown) {
 }
 
 // Settings management
+interface TerminalStateEntry {
+  terminals: { id: string; name: string }[]
+  activeTerminalId: string
+  isSplitView: boolean
+}
+
 interface AppSettings {
   autoSync: boolean
   terminalTheme?: string
   terminalFontSize?: number
   terminalFontFamily?: string
   appZoomFactor?: number
+  terminalStates?: Record<string, TerminalStateEntry>
 }
 
 function loadSettings(): AppSettings {
@@ -461,6 +468,107 @@ ipcMain.handle('save-terminal-settings', (_event, partial: { terminalTheme?: str
   if (partial.terminalFontFamily !== undefined) settings.terminalFontFamily = partial.terminalFontFamily
   saveSettings(settings)
   return true
+})
+
+// Terminal State Persistence Handlers
+const TERMINAL_BUFFERS_DIR = path.join(DATA_DIR, 'terminal-buffers')
+
+function ensureBuffersDir() {
+  if (!fs.existsSync(TERMINAL_BUFFERS_DIR)) {
+    fs.mkdirSync(TERMINAL_BUFFERS_DIR, { recursive: true })
+  }
+}
+
+ipcMain.handle('get-terminal-states', () => {
+  const settings = loadSettings()
+  return settings.terminalStates || {}
+})
+
+ipcMain.handle('save-terminal-states', (_event, states: Record<string, TerminalStateEntry>) => {
+  const settings = loadSettings()
+  settings.terminalStates = states
+  saveSettings(settings)
+  return true
+})
+
+ipcMain.handle('delete-terminal-state', (_event, projectId: string) => {
+  const settings = loadSettings()
+  if (settings.terminalStates) {
+    delete settings.terminalStates[projectId]
+    saveSettings(settings)
+  }
+  return true
+})
+
+ipcMain.handle('save-terminal-buffer', (_event, terminalId: string, content: string) => {
+  ensureBuffersDir()
+  const filePath = path.join(TERMINAL_BUFFERS_DIR, `${terminalId}.txt`)
+  fs.writeFileSync(filePath, content, 'utf-8')
+  return true
+})
+
+ipcMain.handle('load-terminal-buffer', (_event, terminalId: string) => {
+  const filePath = path.join(TERMINAL_BUFFERS_DIR, `${terminalId}.txt`)
+  if (fs.existsSync(filePath)) {
+    return fs.readFileSync(filePath, 'utf-8')
+  }
+  return null
+})
+
+ipcMain.handle('delete-terminal-buffers', (_event, projectId: string) => {
+  if (!fs.existsSync(TERMINAL_BUFFERS_DIR)) return true
+  const files = fs.readdirSync(TERMINAL_BUFFERS_DIR)
+  for (const file of files) {
+    if (file.startsWith(projectId)) {
+      fs.unlinkSync(path.join(TERMINAL_BUFFERS_DIR, file))
+    }
+  }
+  return true
+})
+
+// Image / File Helpers
+const IMAGE_CACHE_DIR = path.join(app.getPath('home'), '.claude', 'image-cache')
+
+ipcMain.handle('find-claude-image', (_event, imageNumber: number) => {
+  // Scan ~/.claude/image-cache/*/<imageNumber>.png, return most recent
+  if (!fs.existsSync(IMAGE_CACHE_DIR)) return null
+  const filename = `${imageNumber}.png`
+  let bestPath: string | null = null
+  let bestMtime = 0
+
+  try {
+    const dirs = fs.readdirSync(IMAGE_CACHE_DIR, { withFileTypes: true })
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue
+      const candidate = path.join(IMAGE_CACHE_DIR, dir.name, filename)
+      if (fs.existsSync(candidate)) {
+        const stat = fs.statSync(candidate)
+        if (stat.mtimeMs > bestMtime) {
+          bestMtime = stat.mtimeMs
+          bestPath = candidate
+        }
+      }
+    }
+  } catch {
+    // ignore scan errors
+  }
+  return bestPath
+})
+
+ipcMain.handle('fs-read-file-base64', (_event, filePath: string): string | null => {
+  try {
+    const buf = fs.readFileSync(filePath)
+    const ext = path.extname(filePath).toLowerCase()
+    const mimeMap: Record<string, string> = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+      '.bmp': 'image/bmp', '.ico': 'image/x-icon'
+    }
+    const mime = mimeMap[ext] || 'application/octet-stream'
+    return `data:${mime};base64,${buf.toString('base64')}`
+  } catch {
+    return null
+  }
 })
 
 // App Zoom Handlers
