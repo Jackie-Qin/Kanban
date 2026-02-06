@@ -125,6 +125,14 @@ declare global {
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
       // Shell methods
       openExternal: (url: string) => Promise<void>
+      // Attachment methods
+      selectFiles: () => Promise<string[] | null>
+      copyFileToAttachments: (taskId: string, sourcePath: string) => Promise<{ name: string; path: string; type: string; size: number } | null>
+      deleteAttachment: (filePath: string) => Promise<boolean>
+      openAttachment: (filePath: string) => Promise<boolean>
+      getAttachmentDataUrl: (filePath: string) => Promise<string | null>
+      saveAttachmentData: (taskId: string, filename: string, base64Data: string) => Promise<{ name: string; path: string; type: string; size: number } | null>
+      deleteTaskAttachments: (taskId: string) => Promise<boolean>
       // Search methods
       searchFiles: (projectPath: string, query: string) => Promise<SearchFileResult[]>
       searchText: (projectPath: string, query: string) => Promise<SearchTextResult[]>

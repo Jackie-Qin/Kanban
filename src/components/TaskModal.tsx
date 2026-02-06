@@ -1,11 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { Task } from '../types'
+import { Task, TaskAttachment } from '../types'
+import { electron } from '../lib/electron'
+import { v4 as uuidv4 } from 'uuid'
 
 interface TaskModalProps {
   task: Task
   onClose: () => void
   isNew?: boolean
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export default function TaskModal({ task, onClose, isNew }: TaskModalProps) {
@@ -14,6 +22,23 @@ export default function TaskModal({ task, onClose, isNew }: TaskModalProps) {
   const [description, setDescription] = useState(task.description)
   const [selectedLabels, setSelectedLabels] = useState<string[]>(task.labels)
   const [dueDate, setDueDate] = useState(task.dueDate || '')
+  const [attachments, setAttachments] = useState<TaskAttachment[]>(task.attachments || [])
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
+
+  // Load thumbnails for image attachments
+  useEffect(() => {
+    const loadThumbnails = async () => {
+      const newThumbnails: Record<string, string> = {}
+      for (const att of attachments) {
+        if (att.type.startsWith('image/')) {
+          const dataUrl = await electron.getAttachmentDataUrl(att.path)
+          if (dataUrl) newThumbnails[att.id] = dataUrl
+        }
+      }
+      setThumbnails(newThumbnails)
+    }
+    loadThumbnails()
+  }, [attachments])
 
   const handleCancel = () => {
     if (isNew) {
@@ -35,9 +60,61 @@ export default function TaskModal({ task, onClose, isNew }: TaskModalProps) {
       title: title.trim() || 'Untitled',
       description,
       labels: selectedLabels,
-      dueDate: dueDate || null
+      dueDate: dueDate || null,
+      attachments
     })
     onClose()
+  }
+
+  // Handle paste for images from clipboard
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const blob = item.getAsFile()
+        if (!blob) continue
+
+        // Capture type info synchronously before async read
+        const mimeType = blob.type || item.type || 'image/png'
+        const subtype = mimeType.split('/')[1] || 'png'
+        const ext = subtype === 'jpeg' ? 'jpg' : subtype
+        const filename = `pasted-image-${Date.now()}.${ext}`
+
+        // Convert blob to base64
+        const reader = new FileReader()
+        reader.onload = async () => {
+          const dataUrl = reader.result as string
+          const base64 = dataUrl.split(',')[1]
+
+          const result = await electron.saveAttachmentData(task.id, filename, base64)
+          if (result) {
+            const newAttachment: TaskAttachment = {
+              id: uuidv4(),
+              name: result.name,
+              path: result.path,
+              type: result.type,
+              size: result.size,
+              addedAt: new Date().toISOString()
+            }
+            setAttachments((prev) => [...prev, newAttachment])
+          }
+        }
+        reader.readAsDataURL(blob)
+      }
+    }
+  }
+
+  const handleDeleteAttachment = async (att: TaskAttachment) => {
+    await electron.deleteAttachment(att.path)
+    setAttachments((prev) => prev.filter((a) => a.id !== att.id))
+  }
+
+  const handleOpenAttachment = (att: TaskAttachment) => {
+    electron.openAttachment(att.path)
   }
 
   const handleDelete = () => {
@@ -66,6 +143,7 @@ export default function TaskModal({ task, onClose, isNew }: TaskModalProps) {
       <div
         className="w-full max-w-lg bg-dark-card border border-dark-border rounded-xl shadow-2xl animate-slideUp"
         onClick={(e) => e.stopPropagation()}
+        onPaste={handlePaste}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-dark-border">
@@ -153,6 +231,58 @@ export default function TaskModal({ task, onClose, isNew }: TaskModalProps) {
               onChange={(e) => setDueDate(e.target.value)}
               className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg focus:border-blue-500 outline-none"
             />
+          </div>
+
+          {/* Attachments */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm text-dark-muted">Attachments</label>
+              <span className="text-xs text-dark-muted">Paste images or drag files to card</span>
+            </div>
+            {attachments.length > 0 ? (
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {attachments.map((att) => (
+                  <div key={att.id} className="flex items-center gap-2 p-2 bg-dark-bg border border-dark-border rounded-lg group">
+                    {/* Thumbnail or file icon */}
+                    {thumbnails[att.id] ? (
+                      <img src={thumbnails[att.id]} alt={att.name} className="w-8 h-8 object-cover rounded flex-shrink-0" />
+                    ) : (
+                      <div className="w-8 h-8 flex items-center justify-center bg-dark-hover rounded flex-shrink-0">
+                        <svg className="w-4 h-4 text-dark-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    )}
+                    {/* File info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-dark-text truncate">{att.name}</p>
+                      <p className="text-xs text-dark-muted">{formatFileSize(att.size)}</p>
+                    </div>
+                    {/* Actions */}
+                    <button
+                      onClick={() => handleOpenAttachment(att)}
+                      className="p-1 text-dark-muted hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Open file"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAttachment(att)}
+                      className="p-1 text-dark-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove attachment"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-dark-muted italic">No attachments</p>
+            )}
           </div>
         </div>
 

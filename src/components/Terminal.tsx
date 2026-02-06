@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -343,10 +343,70 @@ export default function Terminal({
 
   const bgColor = getThemeByName(themeName).theme.background || '#14191e'
 
+  const [isDragOver, setIsDragOver] = useState(false)
+  const dragCounterRef = useRef(0)
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    // Only accept kanban task drags (not file drops, etc.)
+    if (e.dataTransfer.types.includes('application/x-kanban-task')) {
+      e.preventDefault()
+      dragCounterRef.current++
+      setIsDragOver(true)
+    }
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/x-kanban-task')) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+  }, [])
+
+  const handleDragLeave = useCallback(() => {
+    dragCounterRef.current--
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0
+      setIsDragOver(false)
+    }
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounterRef.current = 0
+    setIsDragOver(false)
+
+    const taskJson = e.dataTransfer.getData('application/x-kanban-task')
+    if (!taskJson || !ptyCreatedRef.current) return
+
+    try {
+      const task = JSON.parse(taskJson) as { title: string; description: string; attachments?: { name: string; path: string; type: string }[] }
+      let text = `title: ${task.title}`
+      if (task.description) {
+        text += `\ndescription: ${task.description}`
+      }
+      if (task.attachments && task.attachments.length > 0) {
+        const paths = task.attachments.map(a => a.path).join(', ')
+        text += `\nattachments: ${paths}`
+      }
+      text += '\n'
+      electron.ptyWrite(terminalId, text)
+    } catch {
+      // Fallback to plain text
+      const plain = e.dataTransfer.getData('text/plain')
+      if (plain) {
+        electron.ptyWrite(terminalId, plain)
+      }
+    }
+  }, [terminalId])
+
   return (
     <div
-      className="h-full w-full flex flex-col min-h-0"
+      className="h-full w-full flex flex-col min-h-0 relative"
       onClick={onSelect}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       <div
         ref={terminalRef}
@@ -357,6 +417,12 @@ export default function Terminal({
           backgroundColor: bgColor
         }}
       />
+      {/* Drop overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 bg-blue-500/10 border-2 border-blue-500 rounded pointer-events-none z-10 flex items-center justify-center">
+          <span className="text-blue-400 text-sm font-medium bg-black/60 px-3 py-1.5 rounded">Drop task here</span>
+        </div>
+      )}
     </div>
   )
 }

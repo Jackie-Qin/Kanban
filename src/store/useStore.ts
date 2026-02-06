@@ -113,6 +113,12 @@ export const useStore = create<AppState>((set, get) => ({
     electron.deleteTerminalState(id)
     electron.deleteTerminalBuffers(id)
 
+    // Clean up attachments for all tasks in the project
+    const tasksToDelete = get().tasks.filter((t) => t.projectId === id)
+    for (const t of tasksToDelete) {
+      electron.deleteTaskAttachments(t.id)
+    }
+
     set((state) => {
       const newProjects = state.projects.filter((p) => p.id !== id)
       const newTasks = state.tasks.filter((t) => t.projectId !== id)
@@ -208,6 +214,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   deleteTask: (id) => {
+    electron.deleteTaskAttachments(id)
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== id)
     }))

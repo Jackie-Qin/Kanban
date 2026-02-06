@@ -5,6 +5,15 @@ export interface Project {
   order: number
 }
 
+export interface TaskAttachment {
+  id: string
+  name: string
+  path: string
+  type: string
+  size: number
+  addedAt: string
+}
+
 export interface Task {
   id: string
   projectId: string
@@ -17,6 +26,7 @@ export interface Task {
   order: number
   branch?: string // Linked Git branch name
   archived?: boolean
+  attachments?: TaskAttachment[]
 }
 
 export interface Label {

@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useStore } from '../store/useStore'
-import { Task } from '../types'
+import { Task, TaskAttachment } from '../types'
 import { electron } from '../lib/electron'
+import { v4 as uuidv4 } from 'uuid'
 
 interface TaskCardProps {
   task: Task
@@ -32,24 +33,50 @@ function formatRelativeTime(dateString: string): string {
   return `${diffMonth}mo ago`
 }
 
-// Generate branch name from task title
-function generateBranchName(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .substring(0, 50)
-  return `feature/${slug}`
-}
-
 export default function TaskCard({ task, onClick, isDragging, projectPath, onBranchChange }: TaskCardProps) {
   const { labels, updateTask, deleteTask } = useStore()
-  const [showBranchModal, setShowBranchModal] = useState(false)
-  const [branchName, setBranchName] = useState('')
-  const [baseBranch, setBaseBranch] = useState('main')
-  const [branches, setBranches] = useState<string[]>([])
-  const [isCreating, setIsCreating] = useState(false)
+  const [isFileDragOver, setIsFileDragOver] = useState(false)
+
+  // Handle OS file drops onto the card to add as attachments
+  const handleFileDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'copy'
+      setIsFileDragOver(true)
+    }
+  }, [])
+
+  const handleFileDragLeave = useCallback((e: React.DragEvent) => {
+    e.stopPropagation()
+    setIsFileDragOver(false)
+  }, [])
+
+  const handleFileDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsFileDragOver(false)
+
+    const files = e.dataTransfer.files
+    if (!files.length) return
+
+    const newAttachments: TaskAttachment[] = [...(task.attachments || [])]
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i] as File & { path: string }
+      const result = await electron.copyFileToAttachments(task.id, file.path)
+      if (result) {
+        newAttachments.push({
+          id: uuidv4(),
+          name: result.name,
+          path: result.path,
+          type: result.type,
+          size: result.size,
+          addedAt: new Date().toISOString()
+        })
+      }
+    }
+    updateTask(task.id, { attachments: newAttachments })
+  }, [task.id, task.attachments, updateTask])
 
   const {
     attributes,
@@ -74,40 +101,6 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
     const month = d.toLocaleString('default', { month: 'short' })
     const day = d.getDate()
     return { text: `${month} ${day}`, isOverdue }
-  }
-
-  const handleOpenBranchModal = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!projectPath) return
-
-    // Fetch branches
-    const branchList = await electron.gitBranches(projectPath)
-    setBranches(branchList.map((b) => b.name))
-
-    // Set default values
-    setBranchName(generateBranchName(task.title))
-    const current = branchList.find((b) => b.current)
-    setBaseBranch(current?.name || 'main')
-
-    setShowBranchModal(true)
-  }
-
-  const handleCreateBranch = async () => {
-    if (!projectPath || !branchName.trim()) return
-
-    setIsCreating(true)
-    try {
-      const success = await electron.gitCreateBranch(projectPath, branchName.trim(), baseBranch)
-      if (success) {
-        // Link branch to task
-        updateTask(task.id, { branch: branchName.trim() })
-        setShowBranchModal(false)
-        onBranchChange?.()
-      }
-    } catch (error) {
-      console.error('Failed to create branch:', error)
-    }
-    setIsCreating(false)
   }
 
   const handleBranchBadgeClick = async (e: React.MouseEvent) => {
@@ -138,24 +131,43 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
         {...attributes}
         {...listeners}
         onClick={onClick}
-        className={`p-3 bg-dark-bg border border-dark-border rounded-lg cursor-pointer hover:border-dark-muted transition-colors group relative ${
-          isDragging ? 'shadow-lg ring-2 ring-blue-500' : ''
-        }`}
+        onDragOver={handleFileDragOver}
+        onDragLeave={handleFileDragLeave}
+        onDrop={handleFileDrop}
+        className={`p-3 bg-dark-bg border rounded-lg cursor-pointer hover:border-dark-muted transition-colors group relative ${
+          isFileDragOver ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-500/5' : 'border-dark-border'
+        } ${isDragging ? 'shadow-lg ring-2 ring-blue-500' : ''}`}
       >
         {/* Hover actions */}
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
-          {/* Create Branch button (shown if no branch linked) */}
-          {projectPath && !task.branch && (
-            <button
-              onClick={handleOpenBranchModal}
-              className="p-1 text-dark-muted hover:text-green-400 hover:bg-dark-hover rounded"
-              title="Create branch for this task"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-              </svg>
-            </button>
-          )}
+          {/* Drag to terminal handle */}
+          <div
+            draggable="true"
+            onDragStart={(e) => {
+              e.stopPropagation()
+              // Set rich task data for terminal drop
+              const taskData = {
+                title: task.title,
+                description: task.description || '',
+                attachments: (task.attachments || []).map(a => ({ name: a.name, path: a.path, type: a.type }))
+              }
+              e.dataTransfer.setData('application/x-kanban-task', JSON.stringify(taskData))
+              // Plain text fallback
+              let text = `title: ${task.title}`
+              if (task.description) text += `\ndescription: ${task.description}`
+              if (task.attachments?.length) {
+                text += `\nattachments: ${task.attachments.map(a => a.path).join(', ')}`
+              }
+              e.dataTransfer.setData('text/plain', text + '\n')
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+            className="p-1 text-dark-muted hover:text-blue-400 hover:bg-dark-hover rounded cursor-grab"
+            title="Drag to terminal to paste task info"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
           {/* Archive button */}
           <button
             onClick={(e) => {
@@ -230,7 +242,7 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
           </p>
         )}
 
-        {/* Footer: Created time and due date */}
+        {/* Footer: Created time, attachments, and due date */}
         <div className="mt-2 flex items-center justify-between text-xs text-dark-muted">
           {/* Created time */}
           <span className="flex items-center gap-1">
@@ -245,89 +257,44 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
             {task.createdAt ? formatRelativeTime(task.createdAt) : 'Unknown'}
           </span>
 
-          {/* Due date */}
-          {task.dueDate && (
-            <span
-              className={`flex items-center gap-1 ${
-                formatDate(task.dueDate).isOverdue ? 'text-red-400' : ''
-              }`}
-            >
-              <svg
-                className="w-3 h-3"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+          <div className="flex items-center gap-2">
+            {/* Attachments count */}
+            {task.attachments && task.attachments.length > 0 && (
+              <span className="flex items-center gap-0.5">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                </svg>
+                {task.attachments.length}
+              </span>
+            )}
+
+            {/* Due date */}
+            {task.dueDate && (
+              <span
+                className={`flex items-center gap-1 ${
+                  formatDate(task.dueDate).isOverdue ? 'text-red-400' : ''
+                }`}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                />
-              </svg>
-              {formatDate(task.dueDate).text}
-            </span>
-          )}
+                <svg
+                  className="w-3 h-3"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                {formatDate(task.dueDate).text}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Create Branch Modal */}
-      {showBranchModal && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          onClick={() => setShowBranchModal(false)}
-        >
-          <div
-            className="bg-dark-card border border-dark-border rounded-lg w-[400px] p-4 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="font-semibold mb-4">Create Branch</h3>
-
-            <div className="mb-4">
-              <label className="block text-sm text-dark-muted mb-1">Branch name</label>
-              <input
-                type="text"
-                value={branchName}
-                onChange={(e) => setBranchName(e.target.value)}
-                className="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                autoFocus
-              />
-              <p className="text-xs text-dark-muted mt-1">Auto-generated from task title</p>
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm text-dark-muted mb-1">Base branch</label>
-              <select
-                value={baseBranch}
-                onChange={(e) => setBaseBranch(e.target.value)}
-                className="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-              >
-                {branches.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => setShowBranchModal(false)}
-                className="px-4 py-2 text-sm text-dark-muted hover:text-dark-text"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateBranch}
-                disabled={!branchName.trim() || isCreating}
-                className="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded transition-colors"
-              >
-                {isCreating ? 'Creating...' : 'Create & Checkout'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

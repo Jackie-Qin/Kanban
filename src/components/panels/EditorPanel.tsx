@@ -117,7 +117,8 @@ function getLanguage(filename: string): string {
   }
 }
 
-export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParams>) {
+export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams>) {
+  const projectId = props.params.projectId
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [diffViewMode, setDiffViewMode] = useState<'inline' | 'split'>('split')
@@ -125,6 +126,33 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
   const editorRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const monacoRef = useRef<any>(null)
+
+  // Per-project editor state cache
+  const projectStateCache = useRef<Map<string, { openFiles: OpenFile[]; activeFilePath: string | null }>>(new Map())
+  const prevProjectId = useRef<string>(projectId)
+
+  // Save/restore editor state when switching projects
+  useEffect(() => {
+    if (prevProjectId.current !== projectId) {
+      // Save outgoing project state
+      projectStateCache.current.set(prevProjectId.current, {
+        openFiles,
+        activeFilePath
+      })
+
+      // Restore incoming project state (or empty)
+      const cached = projectStateCache.current.get(projectId)
+      if (cached) {
+        setOpenFiles(cached.openFiles)
+        setActiveFilePath(cached.activeFilePath)
+      } else {
+        setOpenFiles([])
+        setActiveFilePath(null)
+      }
+
+      prevProjectId.current = projectId
+    }
+  }, [projectId])
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath)
 

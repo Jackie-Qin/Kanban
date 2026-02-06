@@ -175,6 +175,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Shell methods
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
 
+  // Attachment methods
+  selectFiles: (): Promise<string[] | null> =>
+    ipcRenderer.invoke('select-files'),
+  copyFileToAttachments: (taskId: string, sourcePath: string): Promise<{ name: string; path: string; type: string; size: number } | null> =>
+    ipcRenderer.invoke('copy-file-to-attachments', taskId, sourcePath),
+  deleteAttachment: (filePath: string): Promise<boolean> =>
+    ipcRenderer.invoke('delete-attachment', filePath),
+  openAttachment: (filePath: string): Promise<boolean> =>
+    ipcRenderer.invoke('open-attachment', filePath),
+  getAttachmentDataUrl: (filePath: string): Promise<string | null> =>
+    ipcRenderer.invoke('get-attachment-data-url', filePath),
+  saveAttachmentData: (taskId: string, filename: string, base64Data: string): Promise<{ name: string; path: string; type: string; size: number } | null> =>
+    ipcRenderer.invoke('save-attachment-data', taskId, filename, base64Data),
+  deleteTaskAttachments: (taskId: string): Promise<boolean> =>
+    ipcRenderer.invoke('delete-task-attachments', taskId),
+
   // Search methods
   searchFiles: (projectPath: string, query: string): Promise<{ path: string; name: string; relativePath: string }[]> =>
     ipcRenderer.invoke('search-files', projectPath, query),
