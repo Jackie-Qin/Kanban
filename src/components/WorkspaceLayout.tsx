@@ -298,16 +298,25 @@ export default function WorkspaceLayout({
       updatePanelState()
 
       // Save layout on changes and update panel state
+      // Debounce layout saves to prevent dozens of disk writes during panel resizing
+      let layoutSaveTimer: ReturnType<typeof setTimeout> | null = null
       const disposable = event.api.onDidLayoutChange(() => {
         if (!isRestoringRef.current && apiRef.current) {
-          const layoutState = apiRef.current.toJSON()
-          saveLayout(projectId, layoutState)
           updatePanelState()
+          if (layoutSaveTimer) clearTimeout(layoutSaveTimer)
+          layoutSaveTimer = setTimeout(() => {
+            layoutSaveTimer = null
+            if (apiRef.current) {
+              const layoutState = apiRef.current.toJSON()
+              saveLayout(projectId, layoutState)
+            }
+          }, 1000)
         }
       })
 
       return () => {
         disposable.dispose()
+        if (layoutSaveTimer) clearTimeout(layoutSaveTimer)
       }
     },
     [projectId, projectPath, onTaskClick, layouts, saveLayout, createDefaultLayoutForApi, updatePanelState]

@@ -95,6 +95,7 @@ declare global {
       // Git methods
       gitStatus: (projectPath: string) => Promise<GitStatus>
       gitChangedFiles: (projectPath: string) => Promise<GitChangedFile[]>
+      gitStatusWithFiles: (projectPath: string) => Promise<{ status: GitStatus; files: GitChangedFile[] }>
       gitBranches: (projectPath: string) => Promise<GitBranch[]>
       gitLog: (projectPath: string, branch?: string, limit?: number) => Promise<GitCommit[]>
       gitCommitDetails: (projectPath: string, hash: string) => Promise<GitCommit & { files: GitDiffFile[] }>

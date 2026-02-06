@@ -55,10 +55,10 @@ function getDefaultData() {
   }
 }
 
-function loadData() {
+async function loadData() {
   ensureDataDir()
   if (fs.existsSync(DATA_FILE)) {
-    const content = fs.readFileSync(DATA_FILE, 'utf-8')
+    const content = await fs.promises.readFile(DATA_FILE, 'utf-8')
     return JSON.parse(content)
   }
   return getDefaultData()
@@ -89,11 +89,11 @@ interface AppSettings {
   terminalStates?: Record<string, TerminalStateEntry>
 }
 
-function loadSettings(): AppSettings {
+async function loadSettings(): Promise<AppSettings> {
   ensureDataDir()
   if (fs.existsSync(SETTINGS_FILE)) {
     try {
-      const content = fs.readFileSync(SETTINGS_FILE, 'utf-8')
+      const content = await fs.promises.readFile(SETTINGS_FILE, 'utf-8')
       return JSON.parse(content)
     } catch {
       return { autoSync: false }
@@ -202,9 +202,9 @@ function stopAllGitWatchers() {
   gitWatchDebounces.clear()
 }
 
-function setAutoSync(enabled: boolean) {
+async function setAutoSync(enabled: boolean) {
   autoSyncEnabled = enabled
-  const settings = loadSettings()
+  const settings = await loadSettings()
   settings.autoSync = enabled
   saveSettings(settings)
 
@@ -231,9 +231,9 @@ function updateAutoSyncMenu() {
   }
 }
 
-function setAutoSave(enabled: boolean) {
+async function setAutoSave(enabled: boolean) {
   autoSaveEnabled = enabled
-  const settings = loadSettings()
+  const settings = await loadSettings()
   settings.autoSave = enabled
   saveSettings(settings)
   updateAutoSaveMenu()
@@ -257,7 +257,7 @@ let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 let updateCheckTimeout: ReturnType<typeof setTimeout> | null = null
 
-function createWindow() {
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -279,7 +279,7 @@ function createWindow() {
   }
 
   // Restore saved app zoom factor
-  const savedSettings = loadSettings()
+  const savedSettings = await loadSettings()
   if (savedSettings.appZoomFactor && savedSettings.appZoomFactor !== 1) {
     mainWindow.webContents.on('did-finish-load', () => {
       mainWindow?.webContents.setZoomFactor(savedSettings.appZoomFactor!)
@@ -465,14 +465,14 @@ function createMenu() {
   Menu.setApplicationMenu(menu)
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Load settings and initialize auto-sync / auto-save
-  const settings = loadSettings()
+  const settings = await loadSettings()
   autoSyncEnabled = settings.autoSync
   autoSaveEnabled = settings.autoSave ?? false
 
   createMenu()
-  createWindow()
+  await createWindow()
 
   // Start file watcher if auto-sync was enabled
   if (autoSyncEnabled) {
@@ -517,8 +517,8 @@ app.on('before-quit', () => {
 })
 
 // IPC Handlers
-ipcMain.handle('load-data', () => {
-  return loadData()
+ipcMain.handle('load-data', async () => {
+  return await loadData()
 })
 
 ipcMain.handle('save-data', (_event, data) => {
@@ -547,8 +547,8 @@ ipcMain.handle('set-auto-save', (_event, enabled: boolean) => {
 })
 
 // Terminal Settings Handlers
-ipcMain.handle('get-terminal-settings', () => {
-  const settings = loadSettings()
+ipcMain.handle('get-terminal-settings', async () => {
+  const settings = await loadSettings()
   return {
     terminalTheme: settings.terminalTheme,
     terminalFontSize: settings.terminalFontSize,
@@ -556,8 +556,8 @@ ipcMain.handle('get-terminal-settings', () => {
   }
 })
 
-ipcMain.handle('save-terminal-settings', (_event, partial: { terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string }) => {
-  const settings = loadSettings()
+ipcMain.handle('save-terminal-settings', async (_event, partial: { terminalTheme?: string; terminalFontSize?: number; terminalFontFamily?: string }) => {
+  const settings = await loadSettings()
   if (partial.terminalTheme !== undefined) settings.terminalTheme = partial.terminalTheme
   if (partial.terminalFontSize !== undefined) settings.terminalFontSize = partial.terminalFontSize
   if (partial.terminalFontFamily !== undefined) settings.terminalFontFamily = partial.terminalFontFamily
@@ -574,20 +574,20 @@ function ensureBuffersDir() {
   }
 }
 
-ipcMain.handle('get-terminal-states', () => {
-  const settings = loadSettings()
+ipcMain.handle('get-terminal-states', async () => {
+  const settings = await loadSettings()
   return settings.terminalStates || {}
 })
 
-ipcMain.handle('save-terminal-states', (_event, states: Record<string, TerminalStateEntry>) => {
-  const settings = loadSettings()
+ipcMain.handle('save-terminal-states', async (_event, states: Record<string, TerminalStateEntry>) => {
+  const settings = await loadSettings()
   settings.terminalStates = states
   saveSettings(settings)
   return true
 })
 
-ipcMain.handle('delete-terminal-state', (_event, projectId: string) => {
-  const settings = loadSettings()
+ipcMain.handle('delete-terminal-state', async (_event, projectId: string) => {
+  const settings = await loadSettings()
   if (settings.terminalStates) {
     delete settings.terminalStates[projectId]
     saveSettings(settings)
@@ -666,10 +666,10 @@ ipcMain.handle('get-app-zoom', () => {
   return mainWindow?.webContents.getZoomFactor() ?? 1
 })
 
-ipcMain.handle('set-app-zoom', (_event, factor: number) => {
+ipcMain.handle('set-app-zoom', async (_event, factor: number) => {
   if (mainWindow) {
     mainWindow.webContents.setZoomFactor(factor)
-    const settings = loadSettings()
+    const settings = await loadSettings()
     settings.appZoomFactor = factor
     saveSettings(settings)
   }
@@ -1021,6 +1021,89 @@ ipcMain.handle('git-changed-files', async (_event, projectPath: string): Promise
   } catch (error) {
     console.error('Git changed files error:', error)
     return []
+  }
+})
+
+ipcMain.handle('git-status-with-files', async (_event, projectPath: string): Promise<{ status: GitStatus; files: GitChangedFile[] }> => {
+  try {
+    const git = getGit(projectPath)
+    const isRepo = await git.checkIsRepo()
+
+    if (!isRepo) {
+      return {
+        status: { isRepo: false, branch: '', ahead: 0, behind: 0, modified: 0, staged: 0, untracked: 0 },
+        files: []
+      }
+    }
+
+    const result: StatusResult = await git.status()
+
+    // Derive counts from result.files directly — do NOT use convenience arrays
+    // (result.modified, result.staged, etc.) as they are unreliable.
+    let modifiedCount = 0
+    let stagedCount = 0
+    let untrackedCount = 0
+
+    const files: GitChangedFile[] = []
+
+    for (const f of result.files) {
+      const idx = f.index
+      const wd = f.working_dir
+
+      if (idx === '?' && wd === '?') {
+        untrackedCount++
+        files.push({ file: f.path, status: 'untracked', staged: false })
+        continue
+      }
+
+      if (idx === 'R') {
+        stagedCount++
+        files.push({ file: f.path, status: 'renamed', staged: true })
+        if (wd === 'M') {
+          modifiedCount++
+          files.push({ file: f.path, status: 'modified', staged: false })
+        }
+        continue
+      }
+
+      if (idx === 'M' || idx === 'A') {
+        stagedCount++
+        files.push({ file: f.path, status: 'staged', staged: true })
+      } else if (idx === 'D') {
+        stagedCount++
+        files.push({ file: f.path, status: 'deleted', staged: true })
+      }
+
+      if (wd === 'M') {
+        modifiedCount++
+        files.push({ file: f.path, status: 'modified', staged: false })
+      } else if (wd === 'D') {
+        modifiedCount++
+        files.push({ file: f.path, status: 'deleted', staged: false })
+      }
+    }
+
+    for (const file of result.conflicted) {
+      files.push({ file, status: 'conflicted', staged: false })
+    }
+
+    const status: GitStatus = {
+      isRepo: true,
+      branch: result.current || '',
+      ahead: result.ahead,
+      behind: result.behind,
+      modified: modifiedCount,
+      staged: stagedCount,
+      untracked: untrackedCount
+    }
+
+    return { status, files }
+  } catch (error) {
+    console.error('Git status-with-files error:', error)
+    return {
+      status: { isRepo: false, branch: '', ahead: 0, behind: 0, modified: 0, staged: 0, untracked: 0 },
+      files: []
+    }
   }
 })
 

@@ -3,6 +3,26 @@ import { v4 as uuidv4 } from 'uuid'
 import { Project, Task, Label, AppData, ColumnId } from '../types'
 import { electron } from '../lib/electron'
 
+// Debounce timer for saveData — coalesces rapid mutations into a single disk write
+let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// Flush any pending debounced save immediately (used before app quit)
+function flushPendingSave(getState: () => AppState) {
+  if (!saveDebounceTimer) return
+  clearTimeout(saveDebounceTimer)
+  saveDebounceTimer = null
+  const { isSyncing, projects, tasks, labels, activeProjectId, closedProjectIds, layouts } = getState()
+  if (isSyncing) return
+  try {
+    const sanitizedData = JSON.parse(JSON.stringify({
+      projects, tasks, labels, activeProjectId, closedProjectIds, layouts
+    }))
+    electron.saveData(sanitizedData)
+  } catch (error) {
+    console.error('Failed to flush save data:', error)
+  }
+}
+
 interface AppState extends AppData {
   isLoading: boolean
   isSyncing: boolean // Prevents saves during reload
@@ -68,20 +88,25 @@ export const useStore = create<AppState>((set, get) => ({
 
   saveData: async () => {
     // Don't save while syncing to prevent race conditions
-    const { isSyncing, projects, tasks, labels, activeProjectId, closedProjectIds, layouts } = get()
-    if (isSyncing) {
+    if (get().isSyncing) {
       console.log('Skipping save during sync')
       return
     }
-    try {
-      // Sanitize data to ensure it's serializable (layouts can contain non-cloneable objects)
-      const sanitizedData = JSON.parse(JSON.stringify({
-        projects, tasks, labels, activeProjectId, closedProjectIds, layouts
-      }))
-      await electron.saveData(sanitizedData)
-    } catch (error) {
-      console.error('Failed to save data:', error)
-    }
+    // Debounce: coalesce rapid mutations (drag-reorder, project switch) into one write
+    if (saveDebounceTimer) clearTimeout(saveDebounceTimer)
+    saveDebounceTimer = setTimeout(async () => {
+      saveDebounceTimer = null
+      const { isSyncing, projects, tasks, labels, activeProjectId, closedProjectIds, layouts } = get()
+      if (isSyncing) return
+      try {
+        const sanitizedData = JSON.parse(JSON.stringify({
+          projects, tasks, labels, activeProjectId, closedProjectIds, layouts
+        }))
+        await electron.saveData(sanitizedData)
+      } catch (error) {
+        console.error('Failed to save data:', error)
+      }
+    }, 500)
   },
 
   // Projects
@@ -287,3 +312,8 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveData()
   }
 }))
+
+// Flush pending save on app quit to prevent data loss
+window.addEventListener('beforeunload', () => {
+  flushPendingSave(useStore.getState)
+})

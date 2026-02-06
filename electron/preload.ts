@@ -108,6 +108,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git-status', projectPath),
   gitChangedFiles: (projectPath: string): Promise<GitChangedFile[]> =>
     ipcRenderer.invoke('git-changed-files', projectPath),
+  gitStatusWithFiles: (projectPath: string): Promise<{ status: GitStatus; files: GitChangedFile[] }> =>
+    ipcRenderer.invoke('git-status-with-files', projectPath),
   gitBranches: (projectPath: string): Promise<GitBranch[]> =>
     ipcRenderer.invoke('git-branches', projectPath),
   gitLog: (projectPath: string, branch?: string, limit?: number): Promise<GitCommit[]> =>

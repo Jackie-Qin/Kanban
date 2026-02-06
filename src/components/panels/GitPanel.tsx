@@ -68,6 +68,17 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
   const [lastClickedFileKey, setLastClickedFileKey] = useState<string | null>(null)
 
+  // Track whether this panel tab is active (visible)
+  const [isActive, setIsActive] = useState(false)
+
+  useEffect(() => {
+    setIsActive(api.isActive)
+    const disposable = api.onDidActiveChange((e) => {
+      setIsActive(e.isActive)
+    })
+    return () => disposable.dispose()
+  }, [api])
+
   // Resizable sections
   const [changesHeight, setChangesHeight] = useState(200)
   const [isDragging, setIsDragging] = useState(false)
@@ -112,9 +123,8 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
     const pathAtStart = projectPath
 
     try {
-      const [statusResult, changedFilesResult, branchesResult, commitsResult] = await Promise.all([
-        electron.gitStatus(projectPath),
-        electron.gitChangedFiles(projectPath),
+      const [statusWithFiles, branchesResult, commitsResult] = await Promise.all([
+        electron.gitStatusWithFiles(projectPath),
         electron.gitBranches(projectPath),
         electron.gitLog(projectPath, undefined, 20)
       ])
@@ -122,8 +132,8 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
       // Discard if project changed or a newer fetch was started
       if (activePathRef.current !== pathAtStart || fetchGenRef.current !== gen) return
 
-      setStatus(statusResult)
-      setChangedFiles(changedFilesResult)
+      setStatus(statusWithFiles.status)
+      setChangedFiles(statusWithFiles.files)
       setBranches(branchesResult)
       setCommits(commitsResult)
     } catch (error) {
@@ -156,11 +166,14 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
   }, [fetchData])
 
   // Poll for working tree changes (edits don't trigger .git watcher)
+  // Only poll when panel is active to avoid redundant subprocess calls
   useEffect(() => {
-    if (!projectPath) return
+    if (!projectPath || !isActive) return
+    // Refresh immediately when becoming active
+    fetchData()
     const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
-  }, [projectPath, fetchData])
+  }, [projectPath, isActive, fetchData])
 
   // Handle resize
   useEffect(() => {
