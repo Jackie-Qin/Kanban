@@ -52,10 +52,10 @@ function SortableTab({
       {...listeners}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={`px-4 py-2 text-sm cursor-pointer rounded-t-lg transition-colors no-drag ${
+      className={`px-4 py-1.5 text-sm font-medium cursor-pointer rounded-md transition-colors no-drag ${
         isActive
-          ? 'bg-dark-card text-white border-t border-l border-r border-dark-border'
-          : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
+          ? 'bg-white/15 text-white'
+          : 'text-dark-muted hover:text-dark-text hover:bg-white/5'
       }`}
     >
       {project.name}
@@ -148,79 +148,59 @@ export default function TabBar({ onAddProject, onOpenSettings, onOpenSearch }: T
   return (
     <>
       {/* Combined title bar + tab bar - draggable region with traffic light padding */}
-      <div className="flex items-center h-10 px-4 border-b border-dark-border bg-dark-bg app-drag-region">
+      <div className="relative flex items-center h-10 px-4 border-b border-dark-border bg-dark-bg app-drag-region">
         {/* Left padding for macOS traffic lights (window controls) */}
         <div className="w-16 flex-shrink-0" />
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={openProjects.map((p) => p.id)}
-            strategy={horizontalListSortingStrategy}
-          >
-            <div className="flex items-center gap-1">
-              {openProjects.map((project) => (
-                editingId === project.id ? (
-                  <input
-                    key={project.id}
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onBlur={handleSaveRename}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveRename()
-                      if (e.key === 'Escape') {
-                        setEditingId(null)
-                        setEditName('')
-                      }
-                    }}
-                    autoFocus
-                    className="px-3 py-1.5 text-sm bg-dark-card border border-blue-500 rounded outline-none no-drag"
-                  />
-                ) : (
-                  <SortableTab
-                    key={project.id}
-                    project={project}
-                    isActive={project.id === activeProjectId}
-                    onClick={() => setActiveProject(project.id)}
-                    onContextMenu={(e) => handleContextMenu(e, project.id)}
-                  />
-                )
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
+        {/* Center: Project tabs - absolutely positioned for true centering */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="flex items-center gap-1 pointer-events-auto">
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={openProjects.map((p) => p.id)}
+                strategy={horizontalListSortingStrategy}
+              >
+                <div className="flex items-center gap-1">
+                  {openProjects.map((project) => (
+                    editingId === project.id ? (
+                      <input
+                        key={project.id}
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onBlur={handleSaveRename}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveRename()
+                          if (e.key === 'Escape') {
+                            setEditingId(null)
+                            setEditName('')
+                          }
+                        }}
+                        autoFocus
+                        className="px-3 py-1.5 text-sm bg-dark-card border border-blue-500 rounded outline-none no-drag"
+                      />
+                    ) : (
+                      <SortableTab
+                        key={project.id}
+                        project={project}
+                        isActive={project.id === activeProjectId}
+                        onClick={() => setActiveProject(project.id)}
+                        onContextMenu={(e) => handleContextMenu(e, project.id)}
+                      />
+                    )
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
 
-        <button
-          onClick={onAddProject}
-          className="ml-2 p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors no-drag"
-          title="Add project"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-        </button>
-
-        {/* Closed tabs dropdown */}
-        {closedProjects.length > 0 && (
-          <div className="relative ml-1">
             <button
-              onClick={() => setShowClosedMenu(!showClosedMenu)}
-              className="p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors no-drag"
-              title={`${closedProjects.length} closed tab${closedProjects.length > 1 ? 's' : ''}`}
+              onClick={onAddProject}
+              className="ml-1 p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors no-drag"
+              title="Add project"
             >
               <svg
                 className="w-4 h-4"
@@ -232,12 +212,37 @@ export default function TabBar({ onAddProject, onOpenSettings, onOpenSearch }: T
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
+                  d="M12 4v16m8-8H4"
                 />
               </svg>
             </button>
+
+            {/* Closed tabs dropdown */}
+            {closedProjects.length > 0 && (
+              <div className="relative ml-1">
+                <button
+                  onClick={() => setShowClosedMenu(!showClosedMenu)}
+                  className="p-1.5 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors no-drag"
+                  title={`${closedProjects.length} closed tab${closedProjects.length > 1 ? 's' : ''}`}
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
         <div className="flex-1" />
 

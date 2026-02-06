@@ -79,6 +79,8 @@ declare global {
       ptyWrite: (terminalId: string, data: string) => Promise<boolean>
       ptyResize: (terminalId: string, cols: number, rows: number) => Promise<boolean>
       ptyKill: (terminalId: string) => Promise<boolean>
+      ptyExists: (terminalId: string) => Promise<boolean>
+      ptyReconnect: (terminalId: string) => Promise<string | null>
       onPtyData: (callback: (data: { terminalId: string; data: string }) => void) => () => void
       onPtyExit: (callback: (data: { terminalId: string; exitCode: number }) => void) => () => void
       // File System methods

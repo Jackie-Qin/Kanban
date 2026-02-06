@@ -212,26 +212,38 @@ export default function Terminal({
       }
     })
 
-    // Fit, restore buffer, and create PTY after render
+    // Fit, restore buffer, and create/reconnect PTY after render
     const initTimeout = setTimeout(async () => {
       if (fitAddonRef.current && xtermRef.current) {
         fitAddonRef.current.fit()
+
+        // Check if PTY is already running (survived a window close/reopen)
+        const ptyAlive = await electron.ptyExists(terminalId)
 
         // Restore saved buffer before creating PTY
         try {
           const savedBuffer = await electron.loadTerminalBuffer(terminalId)
           if (savedBuffer && xtermRef.current) {
             xtermRef.current.write(savedBuffer)
-            xtermRef.current.write('\r\n\x1b[90m--- Session restored ---\x1b[0m\r\n')
+            if (!ptyAlive) {
+              xtermRef.current.write('\r\n\x1b[90m--- Session restored ---\x1b[0m\r\n')
+            }
           }
         } catch {
           // Ignore buffer restore errors
         }
 
-        // Create PTY
-        if (!ptyCreatedRef.current) {
+        if (ptyAlive) {
+          // Reconnect: flush any output buffered while the window was closed
+          ptyCreatedRef.current = true
+          const buffered = await electron.ptyReconnect(terminalId)
+          if (buffered && xtermRef.current) {
+            xtermRef.current.write(buffered)
+          }
+          electron.ptyResize(terminalId, xtermRef.current!.cols, xtermRef.current!.rows)
+        } else if (!ptyCreatedRef.current) {
+          // No existing PTY — create a fresh one
           const success = await electron.ptyCreate(terminalId, projectPath)
-
           if (success) {
             ptyCreatedRef.current = true
             electron.ptyResize(terminalId, xtermRef.current!.cols, xtermRef.current!.rows)
@@ -267,11 +279,9 @@ export default function Terminal({
         }
       }
 
-      // Only kill PTY if it was created
-      if (ptyCreatedRef.current) {
-        electron.ptyKill(terminalId)
-        ptyCreatedRef.current = false
-      }
+      // Don't kill PTY on unmount — it stays alive across window close/reopen.
+      // PTY is explicitly killed by TerminalDockPanel.closeTerminal() when the user closes a tab.
+      ptyCreatedRef.current = false
 
       // Dispose WebGL addon first to avoid _isDisposed errors during xterm teardown
       if (webglAddonRef.current) {

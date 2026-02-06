@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git'
 import { openInITerm } from './iterm'
-import { createPty, writePty, resizePty, killPty, killAllPty } from './pty'
+import { createPty, writePty, resizePty, killPty, killAllPty, setMainWindow, hasPty, reconnectPty } from './pty'
 
 const DATA_DIR = path.join(app.getPath('home'), '.kanban')
 const DATA_FILE = path.join(DATA_DIR, 'data.json')
@@ -208,6 +208,8 @@ function updateAutoSyncMenu() {
 }
 
 let mainWindow: BrowserWindow | null = null
+let isQuitting = false
+let updateCheckTimeout: ReturnType<typeof setTimeout> | null = null
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -237,6 +239,24 @@ function createWindow() {
       mainWindow?.webContents.setZoomFactor(savedSettings.appZoomFactor!)
     })
   }
+
+  // Register this window so PTY processes can send data to it
+  setMainWindow(mainWindow)
+
+  // macOS: hide instead of close when clicking the red dot.
+  // This keeps the renderer alive so terminals stay connected.
+  mainWindow.on('close', (event) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
+  })
+
+  // Clear window references when actually destroyed (Cmd+Q quit path)
+  mainWindow.on('closed', () => {
+    setMainWindow(null)
+    mainWindow = null
+  })
 }
 
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/Jackie-Qin/Kanban/releases/latest'
@@ -406,26 +426,36 @@ app.whenReady().then(() => {
 
   // Check for updates on startup (production only)
   if (!process.env.VITE_DEV_SERVER_URL) {
-    setTimeout(() => {
+    updateCheckTimeout = setTimeout(() => {
       checkForUpdates()
+      updateCheckTimeout = null
     }, 3000)
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (mainWindow) {
+      mainWindow.show()
+    } else if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
     }
   })
 })
 
 app.on('window-all-closed', () => {
-  killAllPty()
+  // On macOS, keep PTY processes alive — they'll reconnect when the window reopens.
+  // On other platforms the app quits, so kill everything.
   if (process.platform !== 'darwin') {
+    killAllPty()
     app.quit()
   }
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
+  if (updateCheckTimeout) {
+    clearTimeout(updateCheckTimeout)
+    updateCheckTimeout = null
+  }
   killAllPty()
   stopFileWatcher()
   stopAllGitWatchers()
@@ -626,14 +656,19 @@ ipcMain.handle('select-folder', async () => {
 
 // PTY Handlers
 ipcMain.handle('pty-create', (_event, terminalId: string, projectPath: string) => {
-  if (mainWindow) {
-    const success = createPty(terminalId, projectPath, mainWindow)
-    if (!success) {
-      console.error(`Failed to create PTY for terminal ${terminalId}`)
-    }
-    return success
+  const success = createPty(terminalId, projectPath)
+  if (!success) {
+    console.error(`Failed to create PTY for terminal ${terminalId}`)
   }
-  return false
+  return success
+})
+
+ipcMain.handle('pty-exists', (_event, terminalId: string) => {
+  return hasPty(terminalId)
+})
+
+ipcMain.handle('pty-reconnect', (_event, terminalId: string) => {
+  return reconnectPty(terminalId)
 })
 
 ipcMain.handle('pty-write', (_event, terminalId: string, data: string) => {

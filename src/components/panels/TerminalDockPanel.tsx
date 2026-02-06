@@ -167,6 +167,8 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
 
     const closeTerminal = useCallback(
       (terminalId: string) => {
+        // Explicitly kill the PTY since Terminal no longer kills on unmount
+        electron.ptyKill(terminalId)
         const newTerminals = terminals.filter((t) => t.id !== terminalId)
         if (newTerminals.length === 0) {
           // Re-add default terminal

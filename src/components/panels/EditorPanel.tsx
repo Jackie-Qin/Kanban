@@ -441,7 +441,7 @@ export default function EditorPanel(_props: IDockviewPanelProps<EditorPanelParam
           {openFiles.map((file) => (
             <div
               key={file.path}
-              className={`group flex items-center gap-2 px-3 py-2 cursor-pointer border-r border-dark-border text-sm ${
+              className={`group flex items-center gap-2 px-3 py-2 cursor-pointer border-r border-dark-border text-sm whitespace-nowrap flex-shrink-0 ${
                 activeFilePath === file.path
                   ? 'bg-dark-bg text-white'
                   : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'

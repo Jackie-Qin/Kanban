@@ -10,10 +10,31 @@ interface PtyProcess {
 
 const ptyProcesses: Map<string, PtyProcess> = new Map()
 
+// Module-level window reference — updated when window is created/destroyed
+let currentMainWindow: BrowserWindow | null = null
+
+// Per-terminal output buffer for data produced while window is closed
+const outputBuffers: Map<string, string> = new Map()
+const MAX_BUFFER_SIZE = 100 * 1024 // 100KB per terminal
+
+export function setMainWindow(win: BrowserWindow | null): void {
+  currentMainWindow = win
+}
+
+export function hasPty(terminalId: string): boolean {
+  return ptyProcesses.has(terminalId)
+}
+
+// Returns buffered output accumulated while the window was closed, then clears it
+export function reconnectPty(terminalId: string): string | null {
+  const buffered = outputBuffers.get(terminalId)
+  outputBuffers.delete(terminalId)
+  return buffered || null
+}
+
 export function createPty(
   terminalId: string,
-  projectPath: string,
-  mainWindow: BrowserWindow
+  projectPath: string
 ): boolean {
   // Kill existing pty with this terminal ID if any
   killPty(terminalId)
@@ -40,15 +61,24 @@ export function createPty(
     })
 
     ptyProcess.onData((data) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty-data', { terminalId, data })
+      if (currentMainWindow && !currentMainWindow.isDestroyed()) {
+        currentMainWindow.webContents.send('pty-data', { terminalId, data })
+      } else {
+        // Buffer output when window is closed so it can be flushed on reconnect
+        const existing = outputBuffers.get(terminalId) || ''
+        const newBuffer = existing + data
+        outputBuffers.set(
+          terminalId,
+          newBuffer.length > MAX_BUFFER_SIZE ? newBuffer.slice(-MAX_BUFFER_SIZE) : newBuffer
+        )
       }
     })
 
     ptyProcess.onExit(({ exitCode }) => {
       ptyProcesses.delete(terminalId)
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty-exit', { terminalId, exitCode })
+      outputBuffers.delete(terminalId)
+      if (currentMainWindow && !currentMainWindow.isDestroyed()) {
+        currentMainWindow.webContents.send('pty-exit', { terminalId, exitCode })
       }
     })
 
@@ -88,6 +118,7 @@ export function killPty(terminalId: string): void {
     }
     ptyProcesses.delete(terminalId)
   }
+  outputBuffers.delete(terminalId)
 }
 
 export function killAllPty(): void {
@@ -99,4 +130,5 @@ export function killAllPty(): void {
     }
   })
   ptyProcesses.clear()
+  outputBuffers.clear()
 }
