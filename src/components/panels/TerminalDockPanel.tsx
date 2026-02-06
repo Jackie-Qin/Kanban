@@ -351,24 +351,27 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
                     </div>
                   ))
                 ) : (
-                  // Single view - show only active terminal at 100%
-                  state.terminals.map((terminal) => (
-                    <div
-                      key={terminal.id}
-                      className="h-full min-w-0 min-h-0"
-                      style={{
-                        width: state.activeTerminalId === terminal.id ? '100%' : '0%',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <Terminal
-                        terminalId={terminal.id}
-                        projectPath={state.projectPath}
-                        isActive={isCurrentProject && state.activeTerminalId === terminal.id}
-                        onSelect={() => setActiveTerminalId(terminal.id)}
-                      />
-                    </div>
-                  ))
+                  // Single view - stack terminals, toggle visibility (no width changes)
+                  state.terminals.map((terminal) => {
+                    const isActiveTerminal = state.activeTerminalId === terminal.id
+                    return (
+                      <div
+                        key={terminal.id}
+                        className="absolute inset-0"
+                        style={{
+                          visibility: isActiveTerminal ? undefined : 'hidden',
+                          pointerEvents: isActiveTerminal ? 'auto' : 'none'
+                        }}
+                      >
+                        <Terminal
+                          terminalId={terminal.id}
+                          projectPath={state.projectPath}
+                          isActive={isCurrentProject && isActiveTerminal}
+                          onSelect={() => setActiveTerminalId(terminal.id)}
+                        />
+                      </div>
+                    )
+                  })
                 )}
               </div>
             )

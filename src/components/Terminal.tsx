@@ -28,7 +28,7 @@ export default function Terminal({
   const ptyCreatedRef = useRef(false)
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
-  // Fit terminal to container
+  // Fit terminal to container and scroll to bottom
   const fitTerminal = useCallback(() => {
     if (fitAddonRef.current && xtermRef.current && terminalRef.current) {
       const { offsetWidth, offsetHeight } = terminalRef.current
@@ -41,6 +41,8 @@ export default function Terminal({
           if (ptyCreatedRef.current) {
             electron.ptyResize(terminalId, cols, rows)
           }
+
+          xtermRef.current.scrollToBottom()
         } catch (e) {
           console.error(`[Terminal] Failed to fit:`, e)
         }
@@ -249,6 +251,9 @@ export default function Terminal({
             electron.ptyResize(terminalId, xtermRef.current!.cols, xtermRef.current!.rows)
           }
         }
+
+        // Ensure terminal is scrolled to bottom after init/restore
+        xtermRef.current?.scrollToBottom()
       }
     }, 100)
 

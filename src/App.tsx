@@ -48,7 +48,7 @@ export default function App() {
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
 
-  // Handle keyboard shortcuts for search
+  // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Cmd+P: File search
@@ -60,6 +60,25 @@ export default function App() {
       if (e.metaKey && e.shiftKey && e.key === 'f') {
         e.preventDefault()
         setSearchMode('text')
+      }
+
+      // Cmd+Left / Cmd+Right: Switch projects
+      if (e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const { projects: allProjects, activeProjectId: currentId, closedProjectIds: closedIds, setActiveProject: switchTo } = useStore.getState()
+        const openProjects = allProjects.filter(p => !closedIds.includes(p.id))
+        if (openProjects.length < 2) return
+
+        const currentIndex = openProjects.findIndex(p => p.id === currentId)
+        if (currentIndex === -1) return
+
+        e.preventDefault()
+        if (e.key === 'ArrowLeft') {
+          const prevIndex = (currentIndex - 1 + openProjects.length) % openProjects.length
+          switchTo(openProjects[prevIndex].id)
+        } else {
+          const nextIndex = (currentIndex + 1) % openProjects.length
+          switchTo(openProjects[nextIndex].id)
+        }
       }
     }
 
