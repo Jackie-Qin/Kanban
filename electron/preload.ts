@@ -153,6 +153,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Auto Sync methods
   getAutoSync: (): Promise<boolean> => ipcRenderer.invoke('get-auto-sync'),
   setAutoSync: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('set-auto-sync', enabled),
+  // Auto Save methods
+  getAutoSave: (): Promise<boolean> => ipcRenderer.invoke('get-auto-save'),
+  setAutoSave: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('set-auto-save', enabled),
+  onAutoSaveChanged: (callback: (enabled: boolean) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, enabled: boolean) => {
+      callback(enabled)
+    }
+    ipcRenderer.on('auto-save-changed', listener)
+    return () => ipcRenderer.removeListener('auto-save-changed', listener)
+  },
   onDataFileChanged: (callback: () => void) => {
     const listener = () => {
       callback()

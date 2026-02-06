@@ -26,6 +26,7 @@ const FILE_MIME_MAP: Record<string, string> = {
 
 // Auto-sync state
 let autoSyncEnabled = false
+let autoSaveEnabled = false
 let fileWatcher: fs.FSWatcher | null = null
 let lastSaveTime = 0 // Track when we last saved to avoid reload loops
 
@@ -80,6 +81,7 @@ interface TerminalStateEntry {
 
 interface AppSettings {
   autoSync: boolean
+  autoSave?: boolean
   terminalTheme?: string
   terminalFontSize?: number
   terminalFontFamily?: string
@@ -134,13 +136,15 @@ function stopFileWatcher() {
 }
 
 function startGitWatcher(projectPath: string) {
-  const refs = gitWatcherRefs.get(projectPath) || 0
-  gitWatcherRefs.set(projectPath, refs + 1)
-
-  if (gitWatchers.has(projectPath)) return // Already watching
+  if (gitWatchers.has(projectPath)) {
+    // Already watching — just increment ref count
+    const refs = gitWatcherRefs.get(projectPath) || 0
+    gitWatcherRefs.set(projectPath, refs + 1)
+    return
+  }
 
   const gitDir = path.join(projectPath, '.git')
-  if (!fs.existsSync(gitDir)) return
+  if (!fs.existsSync(gitDir)) return // No .git dir — don't increment ref
 
   try {
     const watcher = fs.watch(gitDir, { recursive: true }, (_eventType, filename) => {
@@ -158,8 +162,11 @@ function startGitWatcher(projectPath: string) {
     })
 
     gitWatchers.set(projectPath, watcher)
+    // Only increment ref after successful creation
+    gitWatcherRefs.set(projectPath, 1)
   } catch (error) {
     console.error('Failed to watch .git directory:', error)
+    // Don't increment ref on failure
   }
 }
 
@@ -197,7 +204,9 @@ function stopAllGitWatchers() {
 
 function setAutoSync(enabled: boolean) {
   autoSyncEnabled = enabled
-  saveSettings({ autoSync: enabled })
+  const settings = loadSettings()
+  settings.autoSync = enabled
+  saveSettings(settings)
 
   if (enabled) {
     startFileWatcher()
@@ -217,6 +226,28 @@ function updateAutoSyncMenu() {
       const autoSyncItem = editMenu.submenu.items.find(item => item.label === 'Auto Sync')
       if (autoSyncItem) {
         autoSyncItem.checked = autoSyncEnabled
+      }
+    }
+  }
+}
+
+function setAutoSave(enabled: boolean) {
+  autoSaveEnabled = enabled
+  const settings = loadSettings()
+  settings.autoSave = enabled
+  saveSettings(settings)
+  updateAutoSaveMenu()
+  mainWindow?.webContents.send('auto-save-changed', enabled)
+}
+
+function updateAutoSaveMenu() {
+  const menu = Menu.getApplicationMenu()
+  if (menu) {
+    const editMenu = menu.items.find(item => item.label === 'Edit')
+    if (editMenu?.submenu) {
+      const autoSaveItem = editMenu.submenu.items.find(item => item.label === 'Auto Save')
+      if (autoSaveItem) {
+        autoSaveItem.checked = autoSaveEnabled
       }
     }
   }
@@ -365,6 +396,14 @@ function createMenu() {
           click: (menuItem) => {
             setAutoSync(menuItem.checked)
           }
+        },
+        {
+          label: 'Auto Save',
+          type: 'checkbox',
+          checked: autoSaveEnabled,
+          click: (menuItem) => {
+            setAutoSave(menuItem.checked)
+          }
         }
       ]
     },
@@ -427,9 +466,10 @@ function createMenu() {
 }
 
 app.whenReady().then(() => {
-  // Load settings and initialize auto-sync
+  // Load settings and initialize auto-sync / auto-save
   const settings = loadSettings()
   autoSyncEnabled = settings.autoSync
+  autoSaveEnabled = settings.autoSave ?? false
 
   createMenu()
   createWindow()
@@ -493,6 +533,16 @@ ipcMain.handle('get-auto-sync', () => {
 
 ipcMain.handle('set-auto-sync', (_event, enabled: boolean) => {
   setAutoSync(enabled)
+  return true
+})
+
+// Auto Save Handlers
+ipcMain.handle('get-auto-save', () => {
+  return autoSaveEnabled
+})
+
+ipcMain.handle('set-auto-save', (_event, enabled: boolean) => {
+  setAutoSave(enabled)
   return true
 })
 
@@ -743,6 +793,12 @@ ipcMain.handle('fs-read-directory', async (_event, dirPath: string): Promise<Fil
 
 ipcMain.handle('fs-read-file', async (_event, filePath: string): Promise<string | null> => {
   try {
+    const stat = fs.statSync(filePath)
+    // Reject files larger than 5MB to avoid freezing the editor
+    if (stat.size > 5 * 1024 * 1024) {
+      console.warn(`File too large to open in editor: ${filePath} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`)
+      return null
+    }
     return fs.readFileSync(filePath, 'utf-8')
   } catch (error) {
     console.error('Failed to read file:', error)
@@ -857,7 +913,7 @@ interface GitChangedFile {
 }
 
 function getGit(projectPath: string): SimpleGit {
-  return simpleGit(projectPath)
+  return simpleGit({ baseDir: projectPath, timeout: { block: 10000 } })
 }
 
 ipcMain.handle('git-status', async (_event, projectPath: string): Promise<GitStatus> => {
@@ -914,32 +970,44 @@ ipcMain.handle('git-changed-files', async (_event, projectPath: string): Promise
     const status: StatusResult = await git.status()
     const files: GitChangedFile[] = []
 
-    // Staged files
-    for (const file of status.staged) {
-      files.push({ file, status: 'staged', staged: true })
-    }
+    // Use status.files directly — the convenience arrays (status.staged,
+    // status.modified, etc.) are unreliable: simple-git puts index-modified
+    // files into `modified` even when the working tree is clean.
+    for (const f of status.files) {
+      const idx = f.index
+      const wd = f.working_dir
 
-    // Modified files (unstaged)
-    for (const file of status.modified) {
-      // Skip if already in staged
-      if (!files.some(f => f.file === file)) {
-        files.push({ file, status: 'modified', staged: false })
+      // Untracked
+      if (idx === '?' && wd === '?') {
+        files.push({ file: f.path, status: 'untracked', staged: false })
+        continue
+      }
+
+      // Renamed files — skip in this loop, handled via status.renamed below
+      if (idx === 'R') {
+        // But still check working tree for additional changes to the renamed file
+        if (wd === 'M') {
+          files.push({ file: f.path, status: 'modified', staged: false })
+        }
+        continue
+      }
+
+      // Staged changes (index column)
+      if (idx === 'M' || idx === 'A') {
+        files.push({ file: f.path, status: 'staged', staged: true })
+      } else if (idx === 'D') {
+        files.push({ file: f.path, status: 'deleted', staged: true })
+      }
+
+      // Working tree changes (working_dir column)
+      if (wd === 'M') {
+        files.push({ file: f.path, status: 'modified', staged: false })
+      } else if (wd === 'D') {
+        files.push({ file: f.path, status: 'deleted', staged: false })
       }
     }
 
-    // Deleted files
-    for (const file of status.deleted) {
-      if (!files.some(f => f.file === file)) {
-        files.push({ file, status: 'deleted', staged: false })
-      }
-    }
-
-    // Untracked files
-    for (const file of status.not_added) {
-      files.push({ file, status: 'untracked', staged: false })
-    }
-
-    // Renamed files
+    // Renamed files (staged) — use status.renamed for the from→to display
     for (const rename of status.renamed) {
       files.push({ file: `${rename.from} → ${rename.to}`, status: 'renamed', staged: true })
     }
@@ -959,13 +1027,6 @@ ipcMain.handle('git-changed-files', async (_event, projectPath: string): Promise
 ipcMain.handle('git-branches', async (_event, projectPath: string): Promise<GitBranch[]> => {
   try {
     const git = getGit(projectPath)
-
-    // Prune stale remote-tracking branches before listing
-    try {
-      await git.fetch(['--prune'])
-    } catch {
-      // Ignore prune errors (might not have remote)
-    }
 
     const branchSummary = await git.branchLocal()
 
@@ -1110,6 +1171,7 @@ ipcMain.handle('git-delete-branch', async (_event, projectPath: string, branchNa
 
 ipcMain.handle('git-stage', async (_event, projectPath: string, files: string[]): Promise<boolean> => {
   try {
+    if (!files || files.length === 0) return true
     const git = getGit(projectPath)
     await git.add(files)
     return true
@@ -1121,6 +1183,7 @@ ipcMain.handle('git-stage', async (_event, projectPath: string, files: string[])
 
 ipcMain.handle('git-unstage', async (_event, projectPath: string, files: string[]): Promise<boolean> => {
   try {
+    if (!files || files.length === 0) return true
     const git = getGit(projectPath)
     await git.reset(['HEAD', '--', ...files])
     return true
@@ -1132,6 +1195,7 @@ ipcMain.handle('git-unstage', async (_event, projectPath: string, files: string[
 
 ipcMain.handle('git-discard', async (_event, projectPath: string, files: string[]): Promise<boolean> => {
   try {
+    if (!files || files.length === 0) return true
     const git = getGit(projectPath)
     await git.checkout(['--', ...files])
     return true

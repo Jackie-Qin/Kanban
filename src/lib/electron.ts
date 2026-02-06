@@ -117,6 +117,10 @@ declare global {
       getAutoSync: () => Promise<boolean>
       setAutoSync: (enabled: boolean) => Promise<boolean>
       onDataFileChanged: (callback: () => void) => () => void
+      // Auto Save methods
+      getAutoSave: () => Promise<boolean>
+      setAutoSave: (enabled: boolean) => Promise<boolean>
+      onAutoSaveChanged: (callback: (enabled: boolean) => void) => () => void
       // Update methods
       updateCheck: () => Promise<void>
       updateDownload: () => Promise<void>

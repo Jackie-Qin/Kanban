@@ -24,8 +24,28 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString()
 }
 
-export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>) {
-  const { projectPath } = params
+export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelParams>) {
+  // Use internal state for projectPath to reliably detect project switches
+  const [projectPath, setProjectPath] = useState(params.projectPath)
+
+  // Sync from React params prop
+  useEffect(() => {
+    if (params.projectPath && params.projectPath !== projectPath) {
+      setProjectPath(params.projectPath)
+    }
+  }, [params.projectPath])
+
+  // Also sync from dockview API event (more reliable for panel.update() calls)
+  useEffect(() => {
+    const disposable = api.onDidParametersChange(() => {
+      const p = api.getParameters() as GitPanelParams
+      if (p?.projectPath) {
+        setProjectPath(prev => prev === p.projectPath ? prev : p.projectPath)
+      }
+    })
+    return () => disposable.dispose()
+  }, [api])
+
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [changedFiles, setChangedFiles] = useState<GitChangedFile[]>([])
   const [branches, setBranches] = useState<GitBranch[]>([])
@@ -38,21 +58,58 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   const [isPushing, setIsPushing] = useState(false)
   const [isPulling, setIsPulling] = useState(false)
   const [isCommitting, setIsCommitting] = useState(false)
+  const [gitError, setGitError] = useState<string | null>(null)
 
   // Hover tooltip
   const [hoveredCommit, setHoveredCommit] = useState<{ commit: GitCommit & { files: GitDiffFile[] }; x: number; y: number } | null>(null)
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Multi-select
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [lastClickedFileKey, setLastClickedFileKey] = useState<string | null>(null)
 
   // Resizable sections
   const [changesHeight, setChangesHeight] = useState(200)
   const [isDragging, setIsDragging] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Clear stale data when switching projects
+  useEffect(() => {
+    setStatus(null)
+    setChangedFiles([])
+    setBranches([])
+    setCommits([])
+    setSelectedCommit(null)
+    setHoveredCommit(null)
+    setSelectedFiles(new Set())
+    setLastClickedFileKey(null)
+    setCommitMessage('')
+    setShowBranchDropdown(false)
+    setGitError(null)
+  }, [projectPath])
+
+  // Auto-dismiss error after 4 seconds
+  useEffect(() => {
+    if (!gitError) return
+    const timeout = setTimeout(() => setGitError(null), 4000)
+    return () => clearTimeout(timeout)
+  }, [gitError])
+
+  // Track the current projectPath via ref to detect stale async responses
+  const activePathRef = useRef(projectPath)
+  activePathRef.current = projectPath
+
+  // Generation counter: only the latest fetchData call's results are applied
+  const fetchGenRef = useRef(0)
+
   const stagedFiles = changedFiles.filter(f => f.staged)
   const unstagedFiles = changedFiles.filter(f => !f.staged)
 
   const fetchData = useCallback(async () => {
     if (!projectPath) return
+
+    const gen = ++fetchGenRef.current
+    const pathAtStart = projectPath
 
     try {
       const [statusResult, changedFilesResult, branchesResult, commitsResult] = await Promise.all([
@@ -61,6 +118,9 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
         electron.gitBranches(projectPath),
         electron.gitLog(projectPath, undefined, 20)
       ])
+
+      // Discard if project changed or a newer fetch was started
+      if (activePathRef.current !== pathAtStart || fetchGenRef.current !== gen) return
 
       setStatus(statusResult)
       setChangedFiles(changedFilesResult)
@@ -94,6 +154,13 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
   }, [fetchData])
+
+  // Poll for working tree changes (edits don't trigger .git watcher)
+  useEffect(() => {
+    if (!projectPath) return
+    const interval = setInterval(fetchData, 3000)
+    return () => clearInterval(interval)
+  }, [projectPath, fetchData])
 
   // Handle resize
   useEffect(() => {
@@ -138,18 +205,21 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
   }
 
   const handleStage = async (files: string[]) => {
-    await electron.gitStage(projectPath, files)
+    const success = await electron.gitStage(projectPath, files)
+    if (!success) setGitError('Failed to stage files')
     await fetchData()
   }
 
   const handleUnstage = async (files: string[]) => {
-    await electron.gitUnstage(projectPath, files)
+    const success = await electron.gitUnstage(projectPath, files)
+    if (!success) setGitError('Failed to unstage files')
     await fetchData()
   }
 
   const handleDiscard = async (file: string) => {
     if (!confirm(`Discard changes to ${file}?`)) return
-    await electron.gitDiscard(projectPath, [file])
+    const success = await electron.gitDiscard(projectPath, [file])
+    if (!success) setGitError(`Failed to discard changes to ${file}`)
     await fetchData()
   }
 
@@ -157,7 +227,8 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     const modifiedFiles = unstagedFiles.filter(f => f.status !== 'untracked').map(f => getFileNameFromPath(f.file))
     if (modifiedFiles.length === 0) return
     if (!confirm(`Discard all changes to ${modifiedFiles.length} file(s)?`)) return
-    await electron.gitDiscard(projectPath, modifiedFiles)
+    const success = await electron.gitDiscard(projectPath, modifiedFiles)
+    if (!success) setGitError('Failed to discard changes')
     await fetchData()
   }
 
@@ -168,20 +239,24 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     if (success) {
       setCommitMessage('')
       await fetchData()
+    } else {
+      setGitError('Commit failed — check for pre-commit hooks or conflicts')
     }
     setIsCommitting(false)
   }
 
   const handlePush = async () => {
     setIsPushing(true)
-    await electron.gitPush(projectPath)
+    const success = await electron.gitPush(projectPath)
+    if (!success) setGitError('Push failed — check remote and network')
     await fetchData()
     setIsPushing(false)
   }
 
   const handlePull = async () => {
     setIsPulling(true)
-    await electron.gitPull(projectPath)
+    const success = await electron.gitPull(projectPath)
+    if (!success) setGitError('Pull failed — check for conflicts or network issues')
     await fetchData()
     setIsPulling(false)
   }
@@ -221,6 +296,65 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
     window.dispatchEvent(
       new CustomEvent('panel:focus', { detail: { panelId: 'editor' } })
     )
+  }
+
+  // Multi-select helpers
+  const selectedStagedFiles = stagedFiles.filter(f => selectedFiles.has(`staged:${f.file}`))
+  const selectedUnstagedFiles = unstagedFiles.filter(f => selectedFiles.has(`unstaged:${f.file}`))
+
+  const handleFileClick = (e: React.MouseEvent, file: GitChangedFile, section: 'staged' | 'unstaged', fileList: GitChangedFile[]) => {
+    const fileKey = `${section}:${file.file}`
+
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      setSelectedFiles(prev => {
+        const next = new Set(prev)
+        if (next.has(fileKey)) next.delete(fileKey)
+        else next.add(fileKey)
+        return next
+      })
+      setLastClickedFileKey(fileKey)
+    } else if (e.shiftKey && lastClickedFileKey) {
+      e.preventDefault()
+      const allKeys = fileList.map(f => `${section}:${f.file}`)
+      const lastIdx = allKeys.indexOf(lastClickedFileKey)
+      const currIdx = allKeys.indexOf(fileKey)
+      if (lastIdx >= 0 && currIdx >= 0) {
+        const [from, to] = [Math.min(lastIdx, currIdx), Math.max(lastIdx, currIdx)]
+        setSelectedFiles(prev => {
+          const next = new Set(prev)
+          for (let i = from; i <= to; i++) next.add(allKeys[i])
+          return next
+        })
+      }
+    } else {
+      setSelectedFiles(new Set())
+      setLastClickedFileKey(null)
+      handleOpenChangedFile(file)
+    }
+  }
+
+  const handleStageSelected = async () => {
+    const files = selectedUnstagedFiles.map(f => getFileNameFromPath(f.file))
+    if (files.length === 0) return
+    await handleStage(files)
+    setSelectedFiles(new Set())
+  }
+
+  const handleUnstageSelected = async () => {
+    const files = selectedStagedFiles.map(f => getFileNameFromPath(f.file))
+    if (files.length === 0) return
+    await handleUnstage(files)
+    setSelectedFiles(new Set())
+  }
+
+  const handleDiscardSelected = async () => {
+    const files = selectedUnstagedFiles.filter(f => f.status !== 'untracked').map(f => getFileNameFromPath(f.file))
+    if (files.length === 0) return
+    if (!confirm(`Discard changes to ${files.length} file(s)?`)) return
+    await electron.gitDiscard(projectPath, files)
+    await fetchData()
+    setSelectedFiles(new Set())
   }
 
   const handleCommitHover = (commit: GitCommit, e: React.MouseEvent) => {
@@ -414,6 +548,21 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
         </div>
       </div>
 
+      {/* Error banner */}
+      {gitError && (
+        <div className="px-4 py-2 bg-red-500/15 border-b border-red-500/30 flex items-center gap-2">
+          <span className="text-xs text-red-400 flex-1">{gitError}</span>
+          <button
+            onClick={() => setGitError(null)}
+            className="p-0.5 text-red-400 hover:text-red-300"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Close dropdown when clicking outside */}
       {showBranchDropdown && (
         <div className="fixed inset-0 z-40" onClick={() => setShowBranchDropdown(false)} />
@@ -427,23 +576,40 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
             {stagedFiles.length > 0 && (
               <div>
                 <div className="flex items-center justify-between px-4 py-2 bg-dark-hover sticky top-0 z-10">
-                  <span className="text-sm font-medium text-green-400">Staged ({stagedFiles.length})</span>
-                  <button
-                    onClick={() => handleUnstage(stagedFiles.map(f => getFileNameFromPath(f.file)))}
-                    className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
-                    title="Unstage all"
-                  >
-                    − All
-                  </button>
+                  <span className="text-sm font-medium text-green-400">
+                    Staged ({stagedFiles.length})
+                    {selectedStagedFiles.length > 0 && (
+                      <span className="text-dark-muted font-normal"> · {selectedStagedFiles.length} selected</span>
+                    )}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {selectedStagedFiles.length > 0 && (
+                      <button
+                        onClick={handleUnstageSelected}
+                        className="text-xs px-2 py-0.5 text-orange-400 hover:text-orange-300 hover:bg-dark-border rounded transition-colors"
+                        title="Unstage selected"
+                      >
+                        − Selected
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleUnstage(stagedFiles.map(f => getFileNameFromPath(f.file)))}
+                      className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+                      title="Unstage all"
+                    >
+                      − All
+                    </button>
+                  </div>
                 </div>
                 {stagedFiles.map((file, index) => {
                   const { filename, directory } = getFileDisplayParts(file.file)
                   const statusInfo = getStatusLetter(file)
+                  const isSelected = selectedFiles.has(`staged:${file.file}`)
                   return (
                     <div
                       key={`staged-${file.file}-${index}`}
-                      className="flex items-center gap-2 px-4 py-1 hover:bg-dark-hover cursor-pointer group"
-                      onClick={() => handleOpenChangedFile(file)}
+                      className={`flex items-center gap-2 px-4 h-7 hover:bg-dark-hover cursor-pointer group ${isSelected ? 'bg-blue-500/20' : ''}`}
+                      onClick={(e) => handleFileClick(e, file, 'staged', stagedFiles)}
                     >
                       <FileIcon name={filename} className="w-4 h-4 flex-shrink-0" />
                       <span className="text-sm truncate">{filename}</span>
@@ -456,7 +622,7 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
                       </span>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleUnstage([getFileNameFromPath(file.file)]) }}
-                        className="p-1 hidden group-hover:block text-dark-muted hover:text-red-400 transition-all flex-shrink-0"
+                        className="p-1 hidden group-hover:block text-dark-muted hover:text-red-400 transition-colors flex-shrink-0"
                         title="Unstage"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -473,34 +639,63 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
             {unstagedFiles.length > 0 && (
               <div>
                 <div className="flex items-center justify-between px-4 py-2 bg-dark-hover sticky top-0 z-10">
-                  <span className="text-sm font-medium text-yellow-400">Changes ({unstagedFiles.length})</span>
-                  <div className="flex items-center gap-1">
-                    {unstagedFiles.some(f => f.status !== 'untracked') && (
-                      <button
-                        onClick={handleDiscardAll}
-                        className="text-xs px-2 py-0.5 text-dark-muted hover:text-orange-400 hover:bg-dark-border rounded transition-colors"
-                        title="Discard all changes"
-                      >
-                        Revert
-                      </button>
+                  <span className="text-sm font-medium text-yellow-400">
+                    Changes ({unstagedFiles.length})
+                    {selectedUnstagedFiles.length > 0 && (
+                      <span className="text-dark-muted font-normal"> · {selectedUnstagedFiles.length} selected</span>
                     )}
-                    <button
-                      onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
-                      className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
-                      title="Stage all"
-                    >
-                      + All
-                    </button>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {selectedUnstagedFiles.length > 0 ? (
+                      <>
+                        {selectedUnstagedFiles.some(f => f.status !== 'untracked') && (
+                          <button
+                            onClick={handleDiscardSelected}
+                            className="text-xs px-2 py-0.5 text-orange-400 hover:text-orange-300 hover:bg-dark-border rounded transition-colors"
+                            title="Discard selected"
+                          >
+                            Revert
+                          </button>
+                        )}
+                        <button
+                          onClick={handleStageSelected}
+                          className="text-xs px-2 py-0.5 text-green-400 hover:text-green-300 hover:bg-dark-border rounded transition-colors"
+                          title="Stage selected"
+                        >
+                          + Selected
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {unstagedFiles.some(f => f.status !== 'untracked') && (
+                          <button
+                            onClick={handleDiscardAll}
+                            className="text-xs px-2 py-0.5 text-dark-muted hover:text-orange-400 hover:bg-dark-border rounded transition-colors"
+                            title="Discard all changes"
+                          >
+                            Revert
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
+                          className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+                          title="Stage all"
+                        >
+                          + All
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
                 {unstagedFiles.map((file, index) => {
                   const { filename, directory } = getFileDisplayParts(file.file)
                   const statusInfo = getStatusLetter(file)
+                  const isSelected = selectedFiles.has(`unstaged:${file.file}`)
                   return (
                     <div
                       key={`unstaged-${file.file}-${index}`}
-                      className="flex items-center gap-2 px-4 py-1 hover:bg-dark-hover cursor-pointer group"
-                      onClick={() => handleOpenChangedFile(file)}
+                      className={`flex items-center gap-2 px-4 h-7 hover:bg-dark-hover cursor-pointer group ${isSelected ? 'bg-blue-500/20' : ''}`}
+                      onClick={(e) => handleFileClick(e, file, 'unstaged', unstagedFiles)}
                     >
                       <FileIcon name={filename} className="w-4 h-4 flex-shrink-0" />
                       <span className="text-sm truncate">{filename}</span>
@@ -648,12 +843,26 @@ export default function GitPanel({ params }: IDockviewPanelProps<GitPanelParams>
           onMouseLeave={handleCommitHoverLeave}
         >
           <div className="flex items-center gap-2.5 mb-2">
-            <img
-              src={`https://github.com/${hoveredCommit.commit.author}.png?size=64`}
-              alt=""
-              className="w-8 h-8 rounded-full flex-shrink-0 bg-dark-hover"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-            />
+            {(() => {
+              // Try GitHub username from noreply email, fall back to author name
+              const email = hoveredCommit.commit.authorEmail || ''
+              const noreplyMatch = email.match(/^(\d+\+)?(.+)@users\.noreply\.github\.com$/)
+              const githubUsername = noreplyMatch ? noreplyMatch[2] : hoveredCommit.commit.author
+              const initials = hoveredCommit.commit.author.charAt(0).toUpperCase()
+              return (
+                <div className="w-8 h-8 flex-shrink-0 relative">
+                  <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-medium">
+                    {initials}
+                  </div>
+                  <img
+                    src={`https://github.com/${githubUsername}.png?size=64`}
+                    alt=""
+                    className="w-8 h-8 rounded-full absolute inset-0"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                  />
+                </div>
+              )
+            })()}
             <div className="min-w-0">
               <div className="text-sm font-medium text-dark-text">{hoveredCommit.commit.author}</div>
               <div className="text-xs text-dark-muted">

@@ -19,9 +19,11 @@ interface FileTreeItemProps {
   node: TreeNode
   depth: number
   showHidden: boolean
+  selectedPaths: Set<string>
   onToggle: (path: string) => void
   onSelect: (path: string, isDirectory: boolean) => void
   onDoubleClick: (path: string, isDirectory: boolean) => void
+  onMultiSelect: (path: string) => void
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void
 }
 
@@ -29,15 +31,21 @@ function FileTreeItem({
   node,
   depth,
   showHidden,
+  selectedPaths,
   onToggle,
   onSelect,
   onDoubleClick,
+  onMultiSelect,
   onContextMenu
 }: FileTreeItemProps) {
   if (node.isHidden && !showHidden) return null
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (e.metaKey || e.ctrlKey) {
+      onMultiSelect(node.path)
+      return
+    }
     if (node.isDirectory) {
       onToggle(node.path)
     } else {
@@ -50,10 +58,12 @@ function FileTreeItem({
     onDoubleClick(node.path, node.isDirectory)
   }
 
+  const isSelected = selectedPaths.has(node.path)
+
   return (
     <div>
       <div
-        className="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-dark-hover rounded text-sm group"
+        className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-dark-hover rounded text-sm group ${isSelected ? 'bg-blue-500/20' : ''}`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
@@ -97,9 +107,11 @@ function FileTreeItem({
               node={child}
               depth={depth + 1}
               showHidden={showHidden}
+              selectedPaths={selectedPaths}
               onToggle={onToggle}
               onSelect={onSelect}
               onDoubleClick={onDoubleClick}
+              onMultiSelect={onMultiSelect}
               onContextMenu={onContextMenu}
             />
           ))}
@@ -122,6 +134,7 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
   const [isCreating, setIsCreating] = useState<'file' | 'folder' | null>(null)
   const [newItemName, setNewItemName] = useState('')
   const [createPath, setCreatePath] = useState('')
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
 
   // Load initial directory
   useEffect(() => {
@@ -299,6 +312,32 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
     setContextMenu(null)
   }, [contextMenu])
 
+  const handleMultiSelect = useCallback((path: string) => {
+    setSelectedPaths(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedPaths.size === 0) return
+    const confirmed = window.confirm(`Are you sure you want to delete ${selectedPaths.size} item(s)?`)
+    if (!confirmed) return
+    for (const p of selectedPaths) {
+      await electron.fsDelete(p)
+    }
+    setSelectedPaths(new Set())
+    loadDirectory(projectPath)
+  }, [selectedPaths, projectPath])
+
+  const handleCopySelectedPaths = useCallback(() => {
+    if (selectedPaths.size === 0) return
+    navigator.clipboard.writeText(Array.from(selectedPaths).join('\n'))
+    setSelectedPaths(new Set())
+  }, [selectedPaths])
+
   const handleCreateSubmit = useCallback(async () => {
     if (!newItemName.trim()) return
 
@@ -437,6 +476,36 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
         </div>
       )}
 
+      {/* Selection bar */}
+      {selectedPaths.size > 0 && (
+        <div className="flex items-center justify-between px-3 py-1.5 bg-blue-500/10 border-b border-dark-border">
+          <span className="text-xs text-blue-400">{selectedPaths.size} selected</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleCopySelectedPaths}
+              className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+              title="Copy paths"
+            >
+              Copy Paths
+            </button>
+            <button
+              onClick={handleDeleteSelected}
+              className="text-xs px-2 py-0.5 text-red-400 hover:text-red-300 hover:bg-dark-border rounded transition-colors"
+              title="Delete selected"
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => setSelectedPaths(new Set())}
+              className="text-xs px-1.5 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
+              title="Clear selection"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* File tree */}
       <div className="flex-1 overflow-auto py-2">
         {displayTree.length === 0 ? (
@@ -450,9 +519,11 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
               node={node}
               depth={0}
               showHidden={showHidden}
+              selectedPaths={selectedPaths}
               onToggle={handleToggle}
               onSelect={handleSelect}
               onDoubleClick={handleDoubleClick}
+              onMultiSelect={handleMultiSelect}
               onContextMenu={handleContextMenu}
             />
           ))
@@ -478,19 +549,39 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
             New Folder
           </button>
           <div className="h-px bg-dark-border my-1" />
-          <button
-            onClick={handleCopyPath}
-            className="w-full px-4 py-2 text-left text-sm hover:bg-dark-hover"
-          >
-            Copy Path
-          </button>
-          <div className="h-px bg-dark-border my-1" />
-          <button
-            onClick={handleDelete}
-            className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-dark-hover"
-          >
-            Delete
-          </button>
+          {selectedPaths.size > 1 ? (
+            <>
+              <button
+                onClick={() => { handleCopySelectedPaths(); setContextMenu(null) }}
+                className="w-full px-4 py-2 text-left text-sm hover:bg-dark-hover"
+              >
+                Copy {selectedPaths.size} Paths
+              </button>
+              <div className="h-px bg-dark-border my-1" />
+              <button
+                onClick={() => { handleDeleteSelected(); setContextMenu(null) }}
+                className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-dark-hover"
+              >
+                Delete {selectedPaths.size} Items
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={handleCopyPath}
+                className="w-full px-4 py-2 text-left text-sm hover:bg-dark-hover"
+              >
+                Copy Path
+              </button>
+              <div className="h-px bg-dark-border my-1" />
+              <button
+                onClick={handleDelete}
+                className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-dark-hover"
+              >
+                Delete
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

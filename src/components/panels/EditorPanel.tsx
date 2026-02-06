@@ -122,6 +122,15 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [diffViewMode, setDiffViewMode] = useState<'inline' | 'split'>('split')
+  const [autoSave, setAutoSave] = useState(false)
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Load persisted auto-save setting from Electron
+  useEffect(() => {
+    electron.getAutoSave().then(setAutoSave)
+    const unsubscribe = electron.onAutoSaveChanged(setAutoSave)
+    return () => unsubscribe()
+  }, [])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -372,6 +381,31 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
     [activeFilePath]
   )
 
+  // Auto-save: debounce save after content changes
+  useEffect(() => {
+    if (!autoSave) return
+    const modifiedFile = openFiles.find(f => f.path === activeFilePath && f.isModified && !f.isImage)
+    if (!modifiedFile) return
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(async () => {
+      const success = await electron.fsWriteFile(modifiedFile.path, modifiedFile.content)
+      if (success) {
+        setOpenFiles(prev =>
+          prev.map(f =>
+            f.path === modifiedFile.path
+              ? { ...f, originalContent: f.content, isModified: false }
+              : f
+          )
+        )
+      }
+    }, 1000)
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    }
+  }, [autoSave, openFiles, activeFilePath])
+
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
     monacoRef.current = monaco
@@ -510,6 +544,23 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
               )}
             </div>
           ))}
+          {/* Auto-save toggle */}
+          <div className="ml-auto flex-shrink-0 flex items-center px-2 border-l border-dark-border">
+            <button
+              onClick={() => { const next = !autoSave; setAutoSave(next); electron.setAutoSave(next) }}
+              className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${
+                autoSave
+                  ? 'text-green-400 bg-green-400/10'
+                  : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
+              }`}
+              title={autoSave ? 'Auto-save enabled (click to disable)' : 'Enable auto-save'}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+              </svg>
+              <span>{autoSave ? 'Auto' : 'Auto'}</span>
+            </button>
+          </div>
         </div>
       )}
 
