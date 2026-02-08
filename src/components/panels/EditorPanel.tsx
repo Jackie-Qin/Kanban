@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import Editor, { DiffEditor, OnMount } from '@monaco-editor/react'
 import { electron } from '../../lib/electron'
+import { eventBus } from '../../lib/eventBus'
 import FileIcon from '../FileIcon'
 
 interface EditorPanelParams {
@@ -134,6 +135,8 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const diffEditorRef = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const monacoRef = useRef<any>(null)
 
   // Per-project editor state cache
@@ -164,29 +167,6 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   }, [projectId])
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath)
-
-  // Listen for file open requests from Directory panel and Search modal
-  useEffect(() => {
-    const handleOpenFile = (e: Event) => {
-      const customEvent = e as CustomEvent<{
-        path?: string
-        filePath?: string
-        preview?: boolean
-        showDiff?: boolean
-        projectPath?: string
-        relativePath?: string
-        line?: number
-      }>
-      const { path, filePath, preview = false, showDiff, projectPath, relativePath, line } = customEvent.detail
-      const targetPath = path || filePath
-      if (targetPath) {
-        openFile(targetPath, preview, showDiff, projectPath, relativePath, line)
-      }
-    }
-
-    window.addEventListener('editor:open-file', handleOpenFile)
-    return () => window.removeEventListener('editor:open-file', handleOpenFile)
-  }, [openFiles])
 
   // Jump to a specific line in the editor
   const jumpToLine = useCallback((lineNumber: number) => {
@@ -317,6 +297,21 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
     [openFiles, jumpToLine]
   )
 
+  // Keep a ref to the latest openFile so the event listener is never stale
+  const openFileRef = useRef(openFile)
+  useEffect(() => { openFileRef.current = openFile }, [openFile])
+
+  // Listen for file open requests from Directory panel and Search modal
+  useEffect(() => {
+    return eventBus.on('editor:open-file', (detail) => {
+      const { path, filePath, preview = false, showDiff, projectPath, relativePath, line } = detail
+      const targetPath = path || filePath
+      if (targetPath) {
+        openFileRef.current(targetPath, preview, showDiff, projectPath, relativePath, line)
+      }
+    })
+  }, [])
+
   const closeFile = useCallback(
     (filePath: string) => {
       const fileIndex = openFiles.findIndex((f) => f.path === filePath)
@@ -406,6 +401,45 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
     }
   }, [autoSave, openFiles, activeFilePath])
 
+  // Track editor mount state so the ResizeObserver effect re-runs after onMount
+  const [editorMounted, setEditorMounted] = useState(0)
+
+  // Debounced resize for Monaco editor (replaces automaticLayout which resizes every frame)
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const container = editor.getDomNode()?.parentElement
+    if (!container) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const ro = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => editor.layout(), 150)
+    })
+    ro.observe(container)
+    return () => {
+      if (timer) clearTimeout(timer)
+      ro.disconnect()
+    }
+  }, [activeFilePath, editorMounted])
+
+  // Debounced resize for DiffEditor (same pattern as above)
+  useEffect(() => {
+    const editor = diffEditorRef.current
+    if (!editor) return
+    const container = editor.getDomNode()?.parentElement
+    if (!container) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const ro = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => editor.layout(), 150)
+    })
+    ro.observe(container)
+    return () => {
+      if (timer) clearTimeout(timer)
+      ro.disconnect()
+    }
+  }, [activeFilePath, editorMounted])
+
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
     monacoRef.current = monaco
@@ -433,6 +467,12 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       saveFile()
     })
+
+    // Force initial layout — the ResizeObserver effect may have run before
+    // onMount (Monaco loads async), so the editor has no dimensions yet.
+    // Also bump editorMounted to re-trigger the ResizeObserver setup.
+    requestAnimationFrame(() => editor.layout())
+    setEditorMounted(c => c + 1)
   }
 
   // Keyboard shortcuts
@@ -583,7 +623,8 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
                 language={getLanguage(activeFile.name)}
                 original={activeFile.gitOriginal}
                 modified={activeFile.content}
-                onMount={(_editor, monaco) => {
+                onMount={(editor, monaco) => {
+                  diffEditorRef.current = editor
                   monacoRef.current = monaco
                   monaco.editor.defineTheme('kanban-dark', {
                     base: 'vs-dark',
@@ -596,6 +637,8 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
                     }
                   })
                   monaco.editor.setTheme('kanban-dark')
+                  requestAnimationFrame(() => editor.layout())
+                  setEditorMounted(c => c + 1)
                 }}
                 options={{
                   fontSize: 13,
@@ -603,7 +646,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
                   readOnly: true,
                   renderSideBySide: diffViewMode === 'split',
                   scrollBeyondLastLine: false,
-                  automaticLayout: true,
+                  automaticLayout: false,
                   padding: { top: 8, bottom: 8 }
                 }}
                 theme="vs-dark"
@@ -633,7 +676,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
                 tabSize: 2,
                 insertSpaces: true,
                 wordWrap: 'off',
-                automaticLayout: true,
+                automaticLayout: false,
                 padding: { top: 8, bottom: 8 },
                 smoothScrolling: true,
                 cursorBlinking: 'smooth',

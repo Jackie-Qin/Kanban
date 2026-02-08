@@ -15,7 +15,16 @@ module.exports = {
           text: '#e0e0e0',
           muted: '#888888',
         }
-      }
+      },
+      animation: {
+        breathe: 'breathe 2s ease-in-out infinite',
+      },
+      keyframes: {
+        breathe: {
+          '0%, 100%': { opacity: '0.6', transform: 'scale(0.95)' },
+          '50%': { opacity: '1', transform: 'scale(1.05)' },
+        },
+      },
     },
   },
   plugins: [],

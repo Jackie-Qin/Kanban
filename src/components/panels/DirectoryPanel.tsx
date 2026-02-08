@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import { electron, FileEntry } from '../../lib/electron'
+import { dirCache } from '../../lib/projectCache'
+import { eventBus } from '../../lib/eventBus'
 import FileIcon from '../FileIcon'
 
 interface DirectoryPanelParams {
@@ -136,11 +138,14 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
   const [createPath, setCreatePath] = useState('')
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
 
-  // Load initial directory
+  // Load initial directory — restore cache instantly, then refresh in background
   useEffect(() => {
-    if (projectPath) {
-      loadDirectory(projectPath)
+    if (!projectPath) return
+    const cached = dirCache.get(projectPath)
+    if (cached) {
+      setTree(cached)
     }
+    loadDirectory(projectPath)
   }, [projectPath])
 
   // Close context menu on click outside
@@ -158,6 +163,10 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
       children: entry.isDirectory ? undefined : undefined
     }))
     setTree(nodes)
+    // Only cache root-level loads (not subfolder refreshes)
+    if (dirPath === projectPath) {
+      dirCache.set(projectPath, nodes)
+    }
   }
 
   const loadChildren = useCallback(async (dirPath: string): Promise<TreeNode[]> => {
@@ -233,14 +242,8 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
   const handleSelect = useCallback(
     (filePath: string, isDirectory: boolean) => {
       if (!isDirectory) {
-        // Dispatch event to open file in editor
-        window.dispatchEvent(
-          new CustomEvent('editor:open-file', {
-            detail: { path: filePath, preview: true }
-          })
-        )
-        // Dispatch event to focus editor panel
-        window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+        eventBus.emit('editor:open-file', { path: filePath, preview: true })
+        eventBus.emit('panel:focus', { panelId: 'editor' })
         onFileSelect?.(filePath, true)
       }
     },
@@ -250,14 +253,8 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
   const handleDoubleClick = useCallback(
     (filePath: string, isDirectory: boolean) => {
       if (!isDirectory) {
-        // Dispatch event to open file permanently in editor
-        window.dispatchEvent(
-          new CustomEvent('editor:open-file', {
-            detail: { path: filePath, preview: false }
-          })
-        )
-        // Dispatch event to focus editor panel
-        window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+        eventBus.emit('editor:open-file', { path: filePath, preview: false })
+        eventBus.emit('panel:focus', { panelId: 'editor' })
         onFileSelect?.(filePath, false)
       }
     },

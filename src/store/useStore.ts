@@ -3,32 +3,11 @@ import { v4 as uuidv4 } from 'uuid'
 import { Project, Task, Label, AppData, ColumnId } from '../types'
 import { electron } from '../lib/electron'
 
-// Debounce timer for saveData — coalesces rapid mutations into a single disk write
-let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
-// Flush any pending debounced save immediately (used before app quit)
-function flushPendingSave(getState: () => AppState) {
-  if (!saveDebounceTimer) return
-  clearTimeout(saveDebounceTimer)
-  saveDebounceTimer = null
-  const { isSyncing, projects, tasks, labels, activeProjectId, closedProjectIds, layouts } = getState()
-  if (isSyncing) return
-  try {
-    const sanitizedData = JSON.parse(JSON.stringify({
-      projects, tasks, labels, activeProjectId, closedProjectIds, layouts
-    }))
-    electron.saveData(sanitizedData)
-  } catch (error) {
-    console.error('Failed to flush save data:', error)
-  }
-}
-
 interface AppState extends AppData {
   isLoading: boolean
   isSyncing: boolean // Prevents saves during reload
   closedProjectIds: string[]
   loadData: () => Promise<void>
-  saveData: () => Promise<void>
 
   // Projects
   addProject: (name: string, path: string) => void
@@ -66,7 +45,6 @@ export const useStore = create<AppState>((set, get) => ({
   isSyncing: false,
 
   loadData: async () => {
-    // Set syncing flag to prevent saves during reload
     set({ isSyncing: true })
     try {
       const data = await electron.loadData()
@@ -86,29 +64,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  saveData: async () => {
-    // Don't save while syncing to prevent race conditions
-    if (get().isSyncing) {
-      console.log('Skipping save during sync')
-      return
-    }
-    // Debounce: coalesce rapid mutations (drag-reorder, project switch) into one write
-    if (saveDebounceTimer) clearTimeout(saveDebounceTimer)
-    saveDebounceTimer = setTimeout(async () => {
-      saveDebounceTimer = null
-      const { isSyncing, projects, tasks, labels, activeProjectId, closedProjectIds, layouts } = get()
-      if (isSyncing) return
-      try {
-        const sanitizedData = JSON.parse(JSON.stringify({
-          projects, tasks, labels, activeProjectId, closedProjectIds, layouts
-        }))
-        await electron.saveData(sanitizedData)
-      } catch (error) {
-        console.error('Failed to save data:', error)
-      }
-    }, 500)
-  },
-
   // Projects
   addProject: (name, path) => {
     const newProject: Project = {
@@ -121,7 +76,9 @@ export const useStore = create<AppState>((set, get) => ({
       projects: [...state.projects, newProject],
       activeProjectId: state.activeProjectId || newProject.id
     }))
-    get().saveData()
+    electron.dbUpsertProject(newProject)
+    const { activeProjectId } = get()
+    electron.dbSetAppState('activeProjectId', activeProjectId)
   },
 
   updateProject: (id, updates) => {
@@ -130,7 +87,8 @@ export const useStore = create<AppState>((set, get) => ({
         p.id === id ? { ...p, ...updates } : p
       )
     }))
-    get().saveData()
+    const updated = get().projects.find((p) => p.id === id)
+    if (updated) electron.dbUpsertProject(updated)
   },
 
   deleteProject: (id) => {
@@ -150,7 +108,6 @@ export const useStore = create<AppState>((set, get) => ({
       const newClosedIds = state.closedProjectIds.filter((pid) => pid !== id)
       let newActiveId = state.activeProjectId
       if (state.activeProjectId === id) {
-        // Find next open project
         const openProjects = newProjects.filter((p) => !newClosedIds.includes(p.id))
         newActiveId = openProjects.length > 0 ? openProjects[0].id : null
       }
@@ -161,7 +118,10 @@ export const useStore = create<AppState>((set, get) => ({
         activeProjectId: newActiveId
       }
     })
-    get().saveData()
+    electron.dbDeleteProject(id)
+    const { activeProjectId, closedProjectIds } = get()
+    electron.dbSetAppState('activeProjectId', activeProjectId)
+    electron.dbSetAppState('closedProjectIds', JSON.stringify(closedProjectIds))
   },
 
   closeProject: (id) => {
@@ -169,7 +129,6 @@ export const useStore = create<AppState>((set, get) => ({
       const newClosedIds = [...state.closedProjectIds, id]
       let newActiveId = state.activeProjectId
       if (state.activeProjectId === id) {
-        // Find next open project
         const openProjects = state.projects.filter((p) => !newClosedIds.includes(p.id))
         newActiveId = openProjects.length > 0 ? openProjects[0].id : null
       }
@@ -178,7 +137,9 @@ export const useStore = create<AppState>((set, get) => ({
         activeProjectId: newActiveId
       }
     })
-    get().saveData()
+    const { activeProjectId, closedProjectIds } = get()
+    electron.dbSetAppState('closedProjectIds', JSON.stringify(closedProjectIds))
+    electron.dbSetAppState('activeProjectId', activeProjectId)
   },
 
   reopenProject: (id) => {
@@ -186,24 +147,26 @@ export const useStore = create<AppState>((set, get) => ({
       closedProjectIds: state.closedProjectIds.filter((pid) => pid !== id),
       activeProjectId: id
     }))
-    get().saveData()
+    const { closedProjectIds } = get()
+    electron.dbSetAppState('closedProjectIds', JSON.stringify(closedProjectIds))
+    electron.dbSetAppState('activeProjectId', id)
   },
 
   setActiveProject: (id) => {
     set({ activeProjectId: id })
-    get().saveData()
+    electron.dbSetAppState('activeProjectId', id)
   },
 
   reorderProjects: (projectIds) => {
-    set((state) => ({
-      projects: projectIds
-        .map((id, index) => {
-          const project = state.projects.find((p) => p.id === id)
-          return project ? { ...project, order: index } : null
-        })
-        .filter(Boolean) as Project[]
-    }))
-    get().saveData()
+    const reordered = projectIds
+      .map((id, index) => {
+        const project = get().projects.find((p) => p.id === id)
+        return project ? { ...project, order: index } : null
+      })
+      .filter(Boolean) as Project[]
+
+    set({ projects: reordered })
+    electron.dbBatchUpsertProjects(reordered)
   },
 
   // Tasks
@@ -225,7 +188,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       tasks: [...state.tasks, newTask]
     }))
-    get().saveData()
+    electron.dbUpsertTask(newTask)
     return newTask
   },
 
@@ -235,7 +198,8 @@ export const useStore = create<AppState>((set, get) => ({
         t.id === id ? { ...t, ...updates } : t
       )
     }))
-    get().saveData()
+    const updated = get().tasks.find((t) => t.id === id)
+    if (updated) electron.dbUpsertTask(updated)
   },
 
   deleteTask: (id) => {
@@ -243,7 +207,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== id)
     }))
-    get().saveData()
+    electron.dbDeleteTask(id)
   },
 
   moveTask: (taskId, toColumn, newOrder) => {
@@ -252,20 +216,24 @@ export const useStore = create<AppState>((set, get) => ({
         t.id === taskId ? { ...t, column: toColumn, order: newOrder } : t
       )
     }))
-    get().saveData()
+    const updated = get().tasks.find((t) => t.id === taskId)
+    if (updated) electron.dbUpsertTask(updated)
   },
 
   reorderTasks: (columnId, taskIds) => {
+    const affected: Task[] = []
     set((state) => ({
       tasks: state.tasks.map((task) => {
         const newIndex = taskIds.indexOf(task.id)
         if (newIndex !== -1) {
-          return { ...task, column: columnId, order: newIndex }
+          const updated = { ...task, column: columnId, order: newIndex }
+          affected.push(updated)
+          return updated
         }
         return task
       })
     }))
-    get().saveData()
+    if (affected.length > 0) electron.dbBatchUpsertTasks(affected)
   },
 
   // Labels
@@ -278,7 +246,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       labels: [...state.labels, newLabel]
     }))
-    get().saveData()
+    electron.dbUpsertLabel(newLabel)
   },
 
   updateLabel: (id, updates) => {
@@ -287,18 +255,27 @@ export const useStore = create<AppState>((set, get) => ({
         l.id === id ? { ...l, ...updates } : l
       )
     }))
-    get().saveData()
+    const updated = get().labels.find((l) => l.id === id)
+    if (updated) electron.dbUpsertLabel(updated)
   },
 
   deleteLabel: (id) => {
+    // Get tasks that have this label so we can update them in DB
+    const affectedTasks: Task[] = []
     set((state) => ({
       labels: state.labels.filter((l) => l.id !== id),
-      tasks: state.tasks.map((t) => ({
-        ...t,
-        labels: t.labels.filter((labelId) => labelId !== id)
-      }))
+      tasks: state.tasks.map((t) => {
+        if (t.labels.includes(id)) {
+          const updated = { ...t, labels: t.labels.filter((labelId) => labelId !== id) }
+          affectedTasks.push(updated)
+          return updated
+        }
+        return t
+      })
     }))
-    get().saveData()
+    electron.dbDeleteLabel(id)
+    // The db-delete-label handler already strips from tasks in DB,
+    // but we also updated them in the store above for consistency
   },
 
   // Layouts
@@ -309,11 +286,6 @@ export const useStore = create<AppState>((set, get) => ({
         [projectId]: layout
       }
     }))
-    get().saveData()
+    electron.dbSaveLayout(projectId, layout)
   }
 }))
-
-// Flush pending save on app quit to prevent data loss
-window.addEventListener('beforeunload', () => {
-  flushPendingSave(useStore.getState)
-})

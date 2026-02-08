@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import { electron, GitStatus, GitBranch, GitCommit, GitDiffFile, GitChangedFile } from '../../lib/electron'
+import { gitCache } from '../../lib/projectCache'
+import { eventBus } from '../../lib/eventBus'
 import FileIcon from '../FileIcon'
 
 interface GitPanelParams {
@@ -84,12 +86,20 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
   const [isDragging, setIsDragging] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Clear stale data when switching projects
+  // Restore cached data (or clear) when switching projects
   useEffect(() => {
-    setStatus(null)
-    setChangedFiles([])
-    setBranches([])
-    setCommits([])
+    const cached = gitCache.get(projectPath)
+    if (cached) {
+      setStatus(cached.status)
+      setChangedFiles(cached.changedFiles)
+      setBranches(cached.branches)
+      setCommits(cached.commits)
+    } else {
+      setStatus(null)
+      setChangedFiles([])
+      setBranches([])
+      setCommits([])
+    }
     setSelectedCommit(null)
     setHoveredCommit(null)
     setSelectedFiles(new Set())
@@ -136,6 +146,15 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
       setChangedFiles(statusWithFiles.files)
       setBranches(branchesResult)
       setCommits(commitsResult)
+
+      // Update cache for instant restore on next switch
+      gitCache.set(pathAtStart, {
+        status: statusWithFiles.status,
+        changedFiles: statusWithFiles.files,
+        branches: branchesResult,
+        commits: commitsResult,
+        timestamp: Date.now()
+      })
     } catch (error) {
       console.error('Failed to fetch git data:', error)
     }
@@ -285,14 +304,8 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
 
   const handleOpenFile = (filePath: string) => {
     const fullPath = `${projectPath}/${filePath}`
-    window.dispatchEvent(
-      new CustomEvent('editor:open-file', {
-        detail: { path: fullPath, preview: false, projectPath, relativePath: filePath }
-      })
-    )
-    window.dispatchEvent(
-      new CustomEvent('panel:focus', { detail: { panelId: 'editor' } })
-    )
+    eventBus.emit('editor:open-file', { path: fullPath, preview: false, projectPath, relativePath: filePath })
+    eventBus.emit('panel:focus', { panelId: 'editor' })
   }
 
   const handleOpenChangedFile = (file: GitChangedFile) => {
@@ -301,14 +314,8 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
       filePath = file.file.split(' → ')[1]
     }
     const fullPath = `${projectPath}/${filePath}`
-    window.dispatchEvent(
-      new CustomEvent('editor:open-file', {
-        detail: { path: fullPath, preview: false, showDiff: true, projectPath, relativePath: filePath }
-      })
-    )
-    window.dispatchEvent(
-      new CustomEvent('panel:focus', { detail: { panelId: 'editor' } })
-    )
+    eventBus.emit('editor:open-file', { path: fullPath, preview: false, showDiff: true, projectPath, relativePath: filePath })
+    eventBus.emit('panel:focus', { panelId: 'editor' })
   }
 
   // Multi-select helpers

@@ -56,8 +56,29 @@ interface UpdateStatus {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   loadData: () => ipcRenderer.invoke('load-data'),
-  saveData: (data: unknown) => ipcRenderer.invoke('save-data', data),
   openITerm: (projectPath: string) => ipcRenderer.invoke('open-iterm', projectPath),
+
+  // Targeted database operations
+  dbSaveLayout: (projectId: string, layout: unknown) =>
+    ipcRenderer.invoke('db-save-layout', projectId, layout),
+  dbSetAppState: (key: string, value: string | null) =>
+    ipcRenderer.invoke('db-set-app-state', key, value),
+  dbUpsertProject: (project: { id: string; name: string; path: string; order: number }) =>
+    ipcRenderer.invoke('db-upsert-project', project),
+  dbDeleteProject: (id: string) =>
+    ipcRenderer.invoke('db-delete-project', id),
+  dbUpsertTask: (task: { id: string; projectId: string; title: string; description: string; column: string; labels: string[]; dueDate: string | null; createdAt: string; order: number; branch?: string; archived?: boolean; attachments?: unknown[] }) =>
+    ipcRenderer.invoke('db-upsert-task', task),
+  dbDeleteTask: (id: string) =>
+    ipcRenderer.invoke('db-delete-task', id),
+  dbBatchUpsertTasks: (tasks: Array<{ id: string; projectId: string; title: string; description: string; column: string; labels: string[]; dueDate: string | null; createdAt: string; order: number; branch?: string; archived?: boolean; attachments?: unknown[] }>) =>
+    ipcRenderer.invoke('db-batch-upsert-tasks', tasks),
+  dbUpsertLabel: (label: { id: string; name: string; color: string }) =>
+    ipcRenderer.invoke('db-upsert-label', label),
+  dbDeleteLabel: (id: string) =>
+    ipcRenderer.invoke('db-delete-label', id),
+  dbBatchUpsertProjects: (projects: Array<{ id: string; name: string; path: string; order: number }>) =>
+    ipcRenderer.invoke('db-batch-upsert-projects', projects),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
 
   // PTY methods - using terminalId for multiple terminals

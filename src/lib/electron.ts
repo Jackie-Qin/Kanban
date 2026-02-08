@@ -71,9 +71,19 @@ declare global {
   interface Window {
     electronAPI: {
       loadData: () => Promise<AppData>
-      saveData: (data: AppData) => Promise<boolean>
       openITerm: (projectPath: string) => Promise<boolean>
       selectFolder: () => Promise<string | null>
+      // Targeted database operations
+      dbSaveLayout: (projectId: string, layout: unknown) => Promise<boolean>
+      dbSetAppState: (key: string, value: string | null) => Promise<boolean>
+      dbUpsertProject: (project: { id: string; name: string; path: string; order: number }) => Promise<boolean>
+      dbDeleteProject: (id: string) => Promise<boolean>
+      dbUpsertTask: (task: { id: string; projectId: string; title: string; description: string; column: string; labels: string[]; dueDate: string | null; createdAt: string; order: number; branch?: string; archived?: boolean; attachments?: unknown[] }) => Promise<boolean>
+      dbDeleteTask: (id: string) => Promise<boolean>
+      dbBatchUpsertTasks: (tasks: Array<{ id: string; projectId: string; title: string; description: string; column: string; labels: string[]; dueDate: string | null; createdAt: string; order: number; branch?: string; archived?: boolean; attachments?: unknown[] }>) => Promise<boolean>
+      dbUpsertLabel: (label: { id: string; name: string; color: string }) => Promise<boolean>
+      dbDeleteLabel: (id: string) => Promise<boolean>
+      dbBatchUpsertProjects: (projects: Array<{ id: string; name: string; path: string; order: number }>) => Promise<boolean>
       // PTY methods - using terminalId for multiple terminals
       ptyCreate: (terminalId: string, projectPath: string) => Promise<boolean>
       ptyWrite: (terminalId: string, data: string) => Promise<boolean>

@@ -6,6 +6,7 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { electron } from '../lib/electron'
 import { useTerminalSettings } from '../store/useTerminalSettings'
 import { getThemeByName } from '../lib/terminalThemes'
+import { eventBus } from '../lib/eventBus'
 
 interface TerminalProps {
   terminalId: string
@@ -122,8 +123,8 @@ export default function Terminal({
             activate: async () => {
               const imagePath = await electron.findClaudeImage(imageNum)
               if (imagePath) {
-                window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { path: imagePath, preview: true } }))
-                window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+                eventBus.emit('editor:open-file', { path: imagePath, preview: true })
+                eventBus.emit('panel:focus', { panelId: 'editor' })
               }
             }
           })
@@ -156,8 +157,8 @@ export default function Terminal({
             activate: async () => {
               const exists = await electron.fsExists(filePath)
               if (exists) {
-                window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { path: filePath, preview: true } }))
-                window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+                eventBus.emit('editor:open-file', { path: filePath, preview: true })
+                eventBus.emit('panel:focus', { panelId: 'editor' })
               }
             }
           })
@@ -181,8 +182,8 @@ export default function Terminal({
               activate: async () => {
                 const exists = await electron.fsExists(filePath)
                 if (exists) {
-                  window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { path: filePath, preview: true } }))
-                  window.dispatchEvent(new CustomEvent('panel:focus', { detail: { panelId: 'editor' } }))
+                  eventBus.emit('editor:open-file', { path: filePath, preview: true })
+                  eventBus.emit('panel:focus', { panelId: 'editor' })
                 }
               }
             })
@@ -275,14 +276,18 @@ export default function Terminal({
       }
     }, 100)
 
-    // Handle resize
+    // Handle resize — debounce to avoid flooding IPC with ptyResize calls
+    // during window resize/fullscreen transitions (all terminals fire at once)
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
     const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(fitTerminal)
+      if (resizeTimer) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(fitTerminal, 150)
     })
     resizeObserver.observe(container)
 
     return () => {
       clearTimeout(initTimeout)
+      if (resizeTimer) clearTimeout(resizeTimer)
       resizeObserver.disconnect()
       unsubscribeData()
       unsubscribeExit()

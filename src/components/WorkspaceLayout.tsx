@@ -7,11 +7,14 @@ import {
 } from 'dockview'
 import { Task } from '../types'
 import { useStore } from '../store/useStore'
+import { gitCache, prefetchGitData, prefetchDirData } from '../lib/projectCache'
 import KanbanPanel from './panels/KanbanPanel'
 import TerminalDockPanel from './panels/TerminalDockPanel'
 import EditorPanel from './panels/EditorPanel'
 import GitPanel from './panels/GitPanel'
 import DirectoryPanel from './panels/DirectoryPanel'
+import PanelErrorBoundary from './PanelErrorBoundary'
+import { eventBus } from '../lib/eventBus'
 
 interface WorkspaceLayoutProps {
   projectId: string
@@ -20,14 +23,26 @@ interface WorkspaceLayoutProps {
   onOpenFile?: (filePath: string) => void
 }
 
+// Wrap a panel component with an error boundary
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function withErrorBoundary(name: string, Panel: React.FC<any>): React.FC<any> {
+  const Wrapped: React.FC<any> = (props) => (
+    <PanelErrorBoundary panel={name}>
+      <Panel {...props} />
+    </PanelErrorBoundary>
+  )
+  Wrapped.displayName = `ErrorBoundary(${name})`
+  return Wrapped
+}
+
 // Component registry for Dockview
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const components: Record<string, React.FC<any>> = {
-  kanban: KanbanPanel,
-  terminal: TerminalDockPanel,
-  editor: EditorPanel,
-  git: GitPanel,
-  directory: DirectoryPanel
+  kanban: withErrorBoundary('Kanban', KanbanPanel),
+  terminal: withErrorBoundary('Terminal', TerminalDockPanel),
+  editor: withErrorBoundary('Editor', EditorPanel),
+  git: withErrorBoundary('Git', GitPanel),
+  directory: withErrorBoundary('Directory', DirectoryPanel)
 }
 
 // Watermark component shown in empty dockview groups
@@ -90,11 +105,33 @@ export default function WorkspaceLayout({
   onOpenFile
 }: WorkspaceLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null)
-  const { layouts, saveLayout } = useStore()
+  const containerRef = useRef<HTMLDivElement>(null)
+  // Read layouts/saveLayout via refs to avoid re-rendering WorkspaceLayout on every layout save
+  const saveLayoutRef = useRef(useStore.getState().saveLayout)
   const isRestoringRef = useRef(false)
   const [isEmpty, setIsEmpty] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [openPanelIds, setOpenPanelIds] = useState<string[]>([])
+
+  // Debounced resize: replaces dockview's per-frame ResizeObserver with a batched one
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const ro = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        if (apiRef.current) {
+          apiRef.current.layout(el.offsetWidth, el.offsetHeight)
+        }
+      }, 16) // single frame delay — batches rapid resize events without visible lag
+    })
+    ro.observe(el)
+    return () => {
+      if (timer) clearTimeout(timer)
+      ro.disconnect()
+    }
+  }, [])
 
   // Check if workspace is empty and track open panels
   const updatePanelState = useCallback(() => {
@@ -109,14 +146,14 @@ export default function WorkspaceLayout({
   const handleResetLayout = useCallback(() => {
     if (apiRef.current) {
       // Clear saved layout for this project
-      saveLayout(projectId, null)
+      saveLayoutRef.current(projectId, null)
       // Clear all existing panels
       apiRef.current.panels.forEach((panel) => panel.api.close())
       // Create default layout
       createDefaultLayoutForApi(apiRef.current)
       setIsEmpty(false)
     }
-  }, [projectId, saveLayout])
+  }, [projectId])
 
   // Add a single panel
   const handleAddPanel = useCallback(
@@ -212,42 +249,30 @@ export default function WorkspaceLayout({
 
   // Listen for panel focus events
   useEffect(() => {
-    const handlePanelFocus = (e: Event) => {
-      const customEvent = e as CustomEvent<{ panelId: string }>
-      const { panelId } = customEvent.detail
+    return eventBus.on('panel:focus', ({ panelId }) => {
       if (apiRef.current) {
         const panel = apiRef.current.getPanel(panelId)
         if (panel) {
           panel.api.setActive()
         }
       }
-    }
-
-    window.addEventListener('panel:focus', handlePanelFocus)
-    return () => window.removeEventListener('panel:focus', handlePanelFocus)
+    })
   }, [])
 
   // Listen for open-file events from SearchModal
   useEffect(() => {
-    const handleOpenFile = (e: Event) => {
-      const customEvent = e as CustomEvent<{ filePath: string }>
-      const { filePath } = customEvent.detail
-
+    return eventBus.on('workspace:open-file', ({ filePath, line }) => {
       // Dispatch to editor panel
       if (apiRef.current) {
         const editorPanel = apiRef.current.getPanel('editor')
         if (editorPanel) {
           editorPanel.api.setActive()
-          // Use the onOpenFile callback or dispatch event to editor
-          window.dispatchEvent(new CustomEvent('editor:open-file', { detail: { filePath } }))
+          eventBus.emit('editor:open-file', { filePath, line })
         }
       }
 
       onOpenFile?.(filePath)
-    }
-
-    window.addEventListener('workspace:open-file', handleOpenFile)
-    return () => window.removeEventListener('workspace:open-file', handleOpenFile)
+    })
   }, [onOpenFile])
 
   // Handle Dockview ready event
@@ -255,8 +280,8 @@ export default function WorkspaceLayout({
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api
 
-      // Try to restore saved layout
-      const savedLayout = layouts?.[projectId]
+      // Read layouts from store snapshot (not reactive) to avoid re-render loops
+      const savedLayout = useStore.getState().layouts?.[projectId]
       if (savedLayout) {
         try {
           isRestoringRef.current = true
@@ -297,29 +322,47 @@ export default function WorkspaceLayout({
       // Check initial state
       updatePanelState()
 
-      // Save layout on changes and update panel state
-      // Debounce layout saves to prevent dozens of disk writes during panel resizing
+      // Save layout on structural changes only (panel add/remove/move).
+      // Track panel count to distinguish structural changes from mere resize events.
+      let lastPanelCount = event.api.panels.length
       let layoutSaveTimer: ReturnType<typeof setTimeout> | null = null
+      let panelStateTimer: ReturnType<typeof setTimeout> | null = null
       const disposable = event.api.onDidLayoutChange(() => {
         if (!isRestoringRef.current && apiRef.current) {
-          updatePanelState()
+          const currentPanelCount = apiRef.current.panels.length
+          const isStructuralChange = currentPanelCount !== lastPanelCount
+          lastPanelCount = currentPanelCount
+
+          if (panelStateTimer) clearTimeout(panelStateTimer)
+          panelStateTimer = setTimeout(updatePanelState, 150)
+
+          // Always reset the save timer (debounce), but use a short delay for
+          // structural changes and a long delay for resize/drag events
           if (layoutSaveTimer) clearTimeout(layoutSaveTimer)
           layoutSaveTimer = setTimeout(() => {
             layoutSaveTimer = null
             if (apiRef.current) {
               const layoutState = apiRef.current.toJSON()
-              saveLayout(projectId, layoutState)
+              saveLayoutRef.current(projectId, layoutState)
             }
-          }, 1000)
+          }, isStructuralChange ? 300 : 2000)
         }
       })
 
       return () => {
         disposable.dispose()
-        if (layoutSaveTimer) clearTimeout(layoutSaveTimer)
+        // Flush pending layout save on unmount so splitter positions aren't lost
+        if (layoutSaveTimer) {
+          clearTimeout(layoutSaveTimer)
+          if (apiRef.current) {
+            const layoutState = apiRef.current.toJSON()
+            saveLayoutRef.current(projectId, layoutState)
+          }
+        }
+        if (panelStateTimer) clearTimeout(panelStateTimer)
       }
     },
-    [projectId, projectPath, onTaskClick, layouts, saveLayout, createDefaultLayoutForApi, updatePanelState]
+    [projectId, projectPath, onTaskClick, createDefaultLayoutForApi, updatePanelState]
   )
 
   // Get panels that aren't currently open
@@ -353,13 +396,39 @@ export default function WorkspaceLayout({
     }
   }, [projectId, projectPath, onTaskClick])
 
+  // Prefetch git + directory data for other open projects during idle time
+  const { projects, closedProjectIds } = useStore()
+  useEffect(() => {
+    const STALE_MS = 30_000
+    const openProjects = projects.filter(
+      (p) => p.id !== projectId && !closedProjectIds.includes(p.id)
+    )
+    if (openProjects.length === 0) return
+
+    const idleCallback = (typeof requestIdleCallback === 'function' ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 200)) as typeof requestIdleCallback
+    const cancelIdle = (typeof cancelIdleCallback === 'function' ? cancelIdleCallback : clearTimeout) as typeof cancelIdleCallback
+
+    const id = idleCallback(() => {
+      for (const p of openProjects) {
+        const cached = gitCache.get(p.path)
+        if (!cached || Date.now() - cached.timestamp > STALE_MS) {
+          prefetchGitData(p.path)
+        }
+        prefetchDirData(p.path)
+      }
+    })
+
+    return () => cancelIdle(id)
+  }, [projectId, projects, closedProjectIds])
+
   return (
-    <div className="h-full w-full relative" onContextMenu={handleContextMenu}>
+    <div ref={containerRef} className="h-full w-full relative" onContextMenu={handleContextMenu}>
       <DockviewReact
         components={components}
         watermarkComponent={Watermark}
         onReady={onReady}
         className="dockview-theme-dark"
+        disableAutoResizing
       />
 
       {/* Side toolbar for closed panels */}

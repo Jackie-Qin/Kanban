@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useStore } from './store/useStore'
 import TabBar from './components/TabBar'
 import WorkspaceLayout from './components/WorkspaceLayout'
@@ -10,22 +10,45 @@ import UpdateNotification from './components/UpdateNotification'
 import { Task } from './types'
 import { electron } from './lib/electron'
 import { useTerminalSettings } from './store/useTerminalSettings'
+import { eventBus } from './lib/eventBus'
+import { prefetchGitData, prefetchDirData } from './lib/projectCache'
 
 type SearchMode = 'files' | 'text'
 type SelectedTask = { task: Task; isNew?: boolean } | null
 
+const MIN_SPLASH_MS = 3000
+
 export default function App() {
-  const { isLoading, loadData, projects, activeProjectId } = useStore()
+  const { isLoading, loadData, projects, activeProjectId, closedProjectIds } = useStore()
   const [showAddProject, setShowAddProject] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [selectedTask, setSelectedTask] = useState<SelectedTask>(null)
   const [searchMode, setSearchMode] = useState<SearchMode | null>(null)
+  const [preInitDone, setPreInitDone] = useState(false)
+  const splashStartRef = useRef(Date.now())
   const { zoomIn, zoomOut, resetZoom, loadSettings: loadTerminalSettings } = useTerminalSettings()
 
   useEffect(() => {
     loadData()
     loadTerminalSettings()
   }, [loadData, loadTerminalSettings])
+
+  // Pre-initialize all open projects after data loads
+  useEffect(() => {
+    if (isLoading || preInitDone) return
+
+    const openProjects = projects.filter(p => !closedProjectIds.includes(p.id))
+
+    const prefetchAll = Promise.allSettled(
+      openProjects.flatMap(p => [prefetchGitData(p.path), prefetchDirData(p.path)])
+    )
+
+    const elapsed = Date.now() - splashStartRef.current
+    const remaining = Math.max(0, MIN_SPLASH_MS - elapsed)
+    const minTimer = new Promise(resolve => setTimeout(resolve, remaining))
+
+    Promise.all([prefetchAll, minTimer]).then(() => setPreInitDone(true))
+  }, [isLoading, projects, closedProjectIds, preInitDone])
 
   // Listen for terminal zoom IPC from menu
   useEffect(() => {
@@ -88,16 +111,33 @@ export default function App() {
 
   // Handle opening files from search
   const handleOpenFile = useCallback((filePath: string, line?: number) => {
-    // Dispatch event to workspace/editor
-    window.dispatchEvent(new CustomEvent('workspace:open-file', {
-      detail: { filePath, line }
-    }))
+    eventBus.emit('workspace:open-file', { filePath, line })
   }, [])
 
-  if (isLoading) {
+  if (isLoading || !preInitDone) {
     return (
       <div className="h-screen flex items-center justify-center bg-dark-bg">
-        <div className="text-dark-muted">Loading...</div>
+        <svg
+          className="animate-breathe"
+          width="80"
+          height="80"
+          viewBox="0 0 1024 1024"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect x="50" y="50" width="924" height="924" rx="180" fill="#0d1117" />
+          <rect x="150" y="180" width="220" height="664" rx="20" fill="#161b22" />
+          <rect x="150" y="180" width="220" height="14" rx="7" fill="#6b7280" />
+          <rect x="170" y="230" width="180" height="100" rx="12" fill="#0d1117" />
+          <rect x="170" y="350" width="180" height="100" rx="12" fill="#0d1117" />
+          <rect x="170" y="470" width="180" height="100" rx="12" fill="#0d1117" />
+          <rect x="400" y="180" width="220" height="664" rx="20" fill="#161b22" />
+          <rect x="400" y="180" width="220" height="14" rx="7" fill="#a855f7" />
+          <rect x="420" y="230" width="180" height="100" rx="12" fill="#0d1117" />
+          <rect x="420" y="350" width="180" height="100" rx="12" fill="#0d1117" />
+          <rect x="650" y="180" width="220" height="664" rx="20" fill="#161b22" />
+          <rect x="650" y="180" width="220" height="14" rx="7" fill="#22c55e" />
+          <rect x="670" y="230" width="180" height="100" rx="12" fill="#0d1117" />
+        </svg>
       </div>
     )
   }

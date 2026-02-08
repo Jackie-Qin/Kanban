@@ -50,11 +50,61 @@ Note: The app uses GitHub API to check for updates (no auto-update). Users must 
 ## Project Structure
 
 - `src/` - React frontend
-  - `components/` - UI components
+  - `components/` - UI components (each panel wrapped in `PanelErrorBoundary`)
   - `components/panels/` - Dockview panel components (TerminalDockPanel, etc.)
+  - `components/PanelErrorBoundary.tsx` - Error boundary for panel crash isolation
   - `store/` - Zustand state management
+  - `lib/eventBus.ts` - Typed cross-panel event emitter
+  - `lib/projectCache.ts` - In-memory git/directory data cache
 - `electron/` - Electron main process
-  - `main.ts` - Main process entry
+  - `main.ts` - App lifecycle, window creation, handler registration (~150 lines)
+  - `shared.ts` - Shared state (paths, settings, mainWindow ref)
   - `preload.ts` - Preload script for IPC
   - `pty.ts` - Terminal PTY management
+  - `menu.ts` - Application menu builder
+  - `updater.ts` - GitHub release update checker
+  - `handlers/data.ts` - Data persistence, auto-sync, settings IPC handlers
+  - `handlers/git.ts` - Git operations + watcher IPC handlers
+  - `handlers/fs.ts` - File system + dialog IPC handlers
+  - `handlers/search.ts` - File/text search IPC handlers
+  - `handlers/attachments.ts` - Attachment management IPC handlers
+  - `handlers/terminal-state.ts` - Terminal state/buffer persistence IPC handlers
+  - `database.ts` - SQLite persistence layer (`better-sqlite3`, WAL mode)
 - `release/` - Built artifacts (DMG, ZIP)
+
+## Architecture Roadmap
+
+The following improvements are planned, in priority order:
+
+### 1. ~~Migrate from JSON to SQLite (`better-sqlite3`)~~ (DONE)
+- Data stored in `~/.kanban/kanban.db` (SQLite, WAL mode). Auto-migrates from `data.json` on first launch (backs up to `data.json.backup`). Schema includes `schema_version` table for future migrations.
+- **Rule:** After migration, every data mutation should be a targeted SQL operation — never rewrite the entire dataset.
+
+### 2. ~~Split `electron/main.ts` into domain modules~~ (DONE)
+- Extracted into `electron/handlers/{data,git,fs,search,attachments,terminal-state}.ts`, `electron/menu.ts`, `electron/updater.ts`, `electron/shared.ts`. `main.ts` is now ~150 lines.
+- **Rule:** New IPC handlers must go in the appropriate domain module, not in `main.ts`.
+
+### 3. ~~Data versioning and migrations~~ (DONE)
+- `schema_version` table in SQLite, initialized at version 1. JSON-to-SQLite migration runs automatically on first launch with backup.
+- **Rule:** Any schema change (new field, renamed field, structural change) requires a numbered migration in `database.ts`.
+
+### 4. ~~Typed event bus for inter-panel communication~~ (DONE)
+- Implemented in `src/lib/eventBus.ts` with typed `EventMap`. All panels migrated.
+- **Rule:** All cross-panel communication must go through `eventBus`. No direct `CustomEvent` usage for app events.
+
+### 5. ~~Async search (ripgrep)~~ (DONE)
+- Search uses `rg` (ripgrep) via `execFile` when available, with fallback to the original sync implementation. Ripgrep auto-detected at `/opt/homebrew/bin/rg`, `/usr/local/bin/rg`, or `/usr/bin/rg`.
+- **Rule:** No synchronous file I/O in search handlers when ripgrep is available.
+
+### 6. ~~React error boundaries per panel~~ (DONE)
+- Implemented `PanelErrorBoundary` component. All 5 panels wrapped via `withErrorBoundary()` in `WorkspaceLayout.tsx`.
+- **Rule:** Every panel registered in `WorkspaceLayout.tsx` must be wrapped in `PanelErrorBoundary`.
+
+### 7. ~~Test infrastructure and core coverage~~ (DONE)
+- Vitest + @testing-library/react. 28 tests covering store mutations (projects, tasks, labels, layouts), event bus, and targeted persistence. Run with `npm test`.
+- **Rule:** New store actions and IPC handlers must have accompanying tests.
+
+### 8. ~~Targeted persistence (eliminate full-rewrite bottleneck)~~ (DONE)
+- Every store mutation now calls a dedicated IPC handler (`db-save-layout`, `db-set-app-state`, `db-upsert-project`, etc.) that executes a single SQL statement. The old `saveData`/`saveAllData` full-table nuke-and-rewrite has been removed entirely.
+- **Rule:** Every store mutation must persist via its own targeted IPC handler in `electron/handlers/data.ts`. NEVER rewrite entire tables. See `docs/design/targeted-persistence.md` for details.
+- **Rule:** Batch operations (reorderProjects, reorderTasks) must use `db-batch-upsert-*` handlers that wrap multiple upserts in a single transaction.
