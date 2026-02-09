@@ -34,7 +34,7 @@ export default function Terminal({
     if (fitAddonRef.current && xtermRef.current && terminalRef.current) {
       const { offsetWidth, offsetHeight } = terminalRef.current
 
-      if (offsetWidth > 0 && offsetHeight > 0) {
+      if (offsetWidth >= 50 && offsetHeight >= 50) {
         try {
           fitAddonRef.current.fit()
           const { cols, rows } = xtermRef.current
@@ -351,21 +351,25 @@ export default function Terminal({
   const [isDragOver, setIsDragOver] = useState(false)
   const dragCounterRef = useRef(0)
 
+  const acceptsDrag = useCallback((e: React.DragEvent) => {
+    return e.dataTransfer.types.includes('application/x-kanban-task') ||
+      e.dataTransfer.types.includes('application/x-kanban-file')
+  }, [])
+
   const handleDragEnter = useCallback((e: React.DragEvent) => {
-    // Only accept kanban task drags (not file drops, etc.)
-    if (e.dataTransfer.types.includes('application/x-kanban-task')) {
+    if (acceptsDrag(e)) {
       e.preventDefault()
       dragCounterRef.current++
       setIsDragOver(true)
     }
-  }, [])
+  }, [acceptsDrag])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('application/x-kanban-task')) {
+    if (acceptsDrag(e)) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'copy'
     }
-  }, [])
+  }, [acceptsDrag])
 
   const handleDragLeave = useCallback(() => {
     dragCounterRef.current--
@@ -380,8 +384,20 @@ export default function Terminal({
     dragCounterRef.current = 0
     setIsDragOver(false)
 
+    if (!ptyCreatedRef.current) return
+
+    // File path drop from directory panel
+    const filePath = e.dataTransfer.getData('application/x-kanban-file')
+    if (filePath) {
+      // Shell-escape the path: wrap in single quotes, escape any internal single quotes
+      const escaped = "'" + filePath.replace(/'/g, "'\\''") + "'"
+      electron.ptyWrite(terminalId, escaped)
+      return
+    }
+
+    // Task card drop
     const taskJson = e.dataTransfer.getData('application/x-kanban-task')
-    if (!taskJson || !ptyCreatedRef.current) return
+    if (!taskJson) return
 
     try {
       const task = JSON.parse(taskJson) as { title: string; description: string; attachments?: { name: string; path: string; type: string }[] }
@@ -414,18 +430,19 @@ export default function Terminal({
       onDrop={handleDrop}
     >
       <div
-        ref={terminalRef}
         className="flex-1 min-h-0 w-full"
         style={{
-          padding: '8px 12px',
+          padding: '8px 0 8px 12px',
           minHeight: '100px',
           backgroundColor: bgColor
         }}
-      />
+      >
+        <div ref={terminalRef} className="h-full w-full" />
+      </div>
       {/* Drop overlay */}
       {isDragOver && (
         <div className="absolute inset-0 bg-blue-500/10 border-2 border-blue-500 rounded pointer-events-none z-10 flex items-center justify-center">
-          <span className="text-blue-400 text-sm font-medium bg-black/60 px-3 py-1.5 rounded">Drop task here</span>
+          <span className="text-blue-400 text-sm font-medium bg-black/60 px-3 py-1.5 rounded">Drop here</span>
         </div>
       )}
     </div>

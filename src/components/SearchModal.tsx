@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, ReactNode } from 'react'
 import { electron, SearchFileResult, SearchTextResult } from '../lib/electron'
 
 type SearchMode = 'files' | 'text'
@@ -9,6 +9,19 @@ interface SearchModalProps {
   projectPath: string
   onClose: () => void
   onOpenFile: (filePath: string, line?: number) => void
+}
+
+function highlightMatch(text: string, query: string): ReactNode {
+  if (!query.trim()) return text
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const regex = new RegExp(`(${escaped})`, 'gi')
+  const parts = text.split(regex)
+  if (parts.length === 1) return text
+  return parts.map((part, i) =>
+    part.toLowerCase() === query.toLowerCase()
+      ? <span key={i} className="text-yellow-300">{part}</span>
+      : part
+  )
 }
 
 export default function SearchModal({
@@ -23,22 +36,22 @@ export default function SearchModal({
   const [textResults, setTextResults] = useState<SearchTextResult[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
+  const [activeMode, setActiveMode] = useState<SearchMode>(mode)
   const inputRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
 
-  // Combined results for navigation - files first, then text matches
-  const results = mode === 'files'
-    ? [...fileResults, ...textResults.map(t => ({ ...t, isTextResult: true }))]
-    : textResults
+  // Results for navigation
+  const results = activeMode === 'files' ? fileResults : textResults
 
-  // Focus input when modal opens
+  // Focus input and reset mode when modal opens
   useEffect(() => {
     if (isOpen) {
       setQuery('')
       setFileResults([])
       setTextResults([])
       setSelectedIndex(0)
+      setActiveMode(mode)
       setTimeout(() => inputRef.current?.focus(), 50)
     }
   }, [isOpen, mode])
@@ -53,14 +66,10 @@ export default function SearchModal({
 
     setIsLoading(true)
     try {
-      if (mode === 'files') {
-        // Search both file names and content for better UX
-        const [fileResults, textResults] = await Promise.all([
-          electron.searchFiles(projectPath, searchQuery),
-          electron.searchText(projectPath, searchQuery)
-        ])
+      if (activeMode === 'files') {
+        const fileResults = await electron.searchFiles(projectPath, searchQuery)
         setFileResults(fileResults)
-        setTextResults(textResults.slice(0, 20)) // Limit content results
+        setTextResults([])
       } else {
         const results = await electron.searchText(projectPath, searchQuery)
         setTextResults(results)
@@ -72,7 +81,7 @@ export default function SearchModal({
     } finally {
       setIsLoading(false)
     }
-  }, [mode, projectPath])
+  }, [activeMode, projectPath])
 
   // Handle query changes with debounce
   useEffect(() => {
@@ -116,7 +125,7 @@ export default function SearchModal({
         e.preventDefault()
         if (results.length > 0) {
           const selected = results[selectedIndex]
-          if ('isTextResult' in selected || 'line' in selected) {
+          if ('line' in selected) {
             onOpenFile((selected as SearchTextResult).path, (selected as SearchTextResult).line)
           } else {
             onOpenFile((selected as SearchFileResult).path)
@@ -129,7 +138,7 @@ export default function SearchModal({
         onClose()
         break
     }
-  }, [results, selectedIndex, mode, onOpenFile, onClose])
+  }, [results, selectedIndex, activeMode, onOpenFile, onClose])
 
   if (!isOpen) return null
 
@@ -164,7 +173,7 @@ export default function SearchModal({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={mode === 'files' ? 'Search files and content...' : 'Search in files...'}
+            placeholder={activeMode === 'files' ? 'Search files and content...' : 'Search in files...'}
             className="flex-1 bg-transparent outline-none text-dark-text placeholder-dark-muted"
             autoComplete="off"
             spellCheck={false}
@@ -172,9 +181,30 @@ export default function SearchModal({
           {isLoading && (
             <div className="w-4 h-4 border-2 border-dark-muted border-t-transparent rounded-full animate-spin" />
           )}
-          <span className="ml-3 text-xs text-dark-muted">
-            {mode === 'files' ? 'Cmd+P' : 'Cmd+Shift+F'}
-          </span>
+        </div>
+
+        {/* Mode tabs */}
+        <div className="flex border-b border-dark-border">
+          {([['files', 'Files'], ['text', 'Content']] as const).map(([m, label]) => (
+            <button
+              key={m}
+              onClick={() => {
+                if (m !== activeMode) {
+                  setActiveMode(m)
+                  setFileResults([])
+                  setTextResults([])
+                  setSelectedIndex(0)
+                }
+              }}
+              className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+                activeMode === m
+                  ? 'text-indigo-400 border-b-2 border-indigo-400'
+                  : 'text-dark-muted hover:text-dark-text'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* Results */}
@@ -189,74 +219,38 @@ export default function SearchModal({
           )}
 
           {/* File name matches */}
-          {mode === 'files' && fileResults.length > 0 && (
-            <>
-              <div className="px-4 py-1 text-xs text-dark-muted bg-dark-bg sticky top-0">
-                Files
+          {activeMode === 'files' && fileResults.map((result, index) => (
+            <div
+              key={result.path}
+              onClick={() => {
+                onOpenFile(result.path)
+                onClose()
+              }}
+              className={`px-4 py-2 cursor-pointer flex items-center gap-3 ${
+                index === selectedIndex ? 'bg-dark-hover' : 'hover:bg-dark-hover/50'
+              }`}
+            >
+              <svg
+                className="w-4 h-4 text-dark-muted flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <div className="text-dark-text truncate">{highlightMatch(result.name, query)}</div>
+                <div className="text-xs text-dark-muted truncate">{result.relativePath}</div>
               </div>
-              {fileResults.map((result, index) => (
-                <div
-                  key={result.path}
-                  onClick={() => {
-                    onOpenFile(result.path)
-                    onClose()
-                  }}
-                  className={`px-4 py-2 cursor-pointer flex items-center gap-3 ${
-                    index === selectedIndex ? 'bg-dark-hover' : 'hover:bg-dark-hover/50'
-                  }`}
-                >
-                  <svg
-                    className="w-4 h-4 text-dark-muted flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-dark-text truncate">{result.name}</div>
-                    <div className="text-xs text-dark-muted truncate">{result.relativePath}</div>
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
+            </div>
+          ))}
 
-          {/* Content matches (shown in files mode too) */}
-          {mode === 'files' && textResults.length > 0 && (
-            <>
-              <div className="px-4 py-1 text-xs text-dark-muted bg-dark-bg sticky top-0">
-                Content matches
-              </div>
-              {textResults.map((result, index) => (
-                <div
-                  key={`${result.path}:${result.line}`}
-                  onClick={() => {
-                    onOpenFile(result.path, result.line)
-                    onClose()
-                  }}
-                  className={`px-4 py-2 cursor-pointer ${
-                    index + fileResults.length === selectedIndex ? 'bg-dark-hover' : 'hover:bg-dark-hover/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-dark-text text-sm truncate">{result.relativePath}</span>
-                    <span className="text-xs text-dark-muted">:{result.line}</span>
-                  </div>
-                  <div className="text-xs text-dark-muted font-mono truncate pl-4">
-                    {result.content}
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-
-          {mode === 'text' && textResults.map((result, index) => (
+          {activeMode === 'text' && textResults.map((result, index) => (
             <div
               key={`${result.path}:${result.line}`}
               onClick={() => {
@@ -268,11 +262,11 @@ export default function SearchModal({
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-dark-text text-sm truncate">{result.relativePath}</span>
+                <span className="text-dark-text text-sm truncate">{highlightMatch(result.relativePath, query)}</span>
                 <span className="text-xs text-dark-muted">:{result.line}</span>
               </div>
               <div className="text-xs text-dark-muted font-mono truncate pl-4">
-                {result.content}
+                {highlightMatch(result.content, query)}
               </div>
             </div>
           ))}

@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('db-save-layout', projectId, layout),
   dbSetAppState: (key: string, value: string | null) =>
     ipcRenderer.invoke('db-set-app-state', key, value),
+  dbGetProjectByPath: (path: string): Promise<{ id: string; name: string; path: string; order: number } | null> =>
+    ipcRenderer.invoke('db-get-project-by-path', path),
   dbUpsertProject: (project: { id: string; name: string; path: string; order: number }) =>
     ipcRenderer.invoke('db-upsert-project', project),
   dbDeleteProject: (id: string) =>

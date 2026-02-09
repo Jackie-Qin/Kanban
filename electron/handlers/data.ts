@@ -15,6 +15,7 @@ import {
   saveLayout as dbSaveLayout,
   setAppState as dbSetAppState,
   upsertProject as dbUpsertProject,
+  getProjectByPath as dbGetProjectByPath,
   deleteProject as dbDeleteProject,
   deleteTasksByProject as dbDeleteTasksByProject,
   upsertTask as dbUpsertTask,
@@ -116,6 +117,10 @@ export function registerDataHandlers() {
   ipcMain.handle('db-set-app-state', (_event, key: string, value: string | null) => {
     dbSetAppState(key, value)
     return true
+  })
+
+  ipcMain.handle('db-get-project-by-path', (_event, path: string) => {
+    return dbGetProjectByPath(path) ?? null
   })
 
   ipcMain.handle('db-upsert-project', (_event, project: { id: string; name: string; path: string; order: number }) => {

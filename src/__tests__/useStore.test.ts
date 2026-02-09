@@ -24,9 +24,8 @@ beforeEach(() => {
 })
 
 describe('Projects', () => {
-  it('addProject creates a project and sets it active if none exists', () => {
-    const { addProject } = useStore.getState()
-    addProject('Test Project', '/tmp/test')
+  it('addProject creates a project and sets it active if none exists', async () => {
+    await useStore.getState().addProject('Test Project', '/tmp/test')
 
     const state = useStore.getState()
     expect(state.projects).toHaveLength(1)
@@ -36,18 +35,17 @@ describe('Projects', () => {
     expect(state.activeProjectId).toBe(state.projects[0].id)
   })
 
-  it('addProject does not override existing activeProjectId', () => {
-    const { addProject } = useStore.getState()
-    addProject('First', '/tmp/first')
+  it('addProject does not override existing activeProjectId', async () => {
+    await useStore.getState().addProject('First', '/tmp/first')
     const firstId = useStore.getState().projects[0].id
 
-    addProject('Second', '/tmp/second')
+    await useStore.getState().addProject('Second', '/tmp/second')
     expect(useStore.getState().activeProjectId).toBe(firstId)
     expect(useStore.getState().projects).toHaveLength(2)
   })
 
-  it('updateProject updates the specified project', () => {
-    useStore.getState().addProject('Old Name', '/tmp/test')
+  it('updateProject updates the specified project', async () => {
+    await useStore.getState().addProject('Old Name', '/tmp/test')
     const id = useStore.getState().projects[0].id
 
     useStore.getState().updateProject(id, { name: 'New Name' })
@@ -55,8 +53,8 @@ describe('Projects', () => {
     expect(useStore.getState().projects[0].path).toBe('/tmp/test') // unchanged
   })
 
-  it('deleteProject removes project and its tasks', () => {
-    useStore.getState().addProject('Project A', '/tmp/a')
+  it('deleteProject removes project and its tasks', async () => {
+    await useStore.getState().addProject('Project A', '/tmp/a')
     const projectId = useStore.getState().projects[0].id
 
     useStore.getState().addTask(projectId, 'Task 1', 'todo')
@@ -69,9 +67,9 @@ describe('Projects', () => {
     expect(useStore.getState().activeProjectId).toBeNull()
   })
 
-  it('closeProject hides the project and switches active', () => {
-    useStore.getState().addProject('A', '/tmp/a')
-    useStore.getState().addProject('B', '/tmp/b')
+  it('closeProject hides the project and switches active', async () => {
+    await useStore.getState().addProject('A', '/tmp/a')
+    await useStore.getState().addProject('B', '/tmp/b')
     const [a, b] = useStore.getState().projects
 
     useStore.getState().setActiveProject(a.id)
@@ -81,8 +79,8 @@ describe('Projects', () => {
     expect(useStore.getState().activeProjectId).toBe(b.id)
   })
 
-  it('reopenProject restores a closed project', () => {
-    useStore.getState().addProject('A', '/tmp/a')
+  it('reopenProject restores a closed project', async () => {
+    await useStore.getState().addProject('A', '/tmp/a')
     const id = useStore.getState().projects[0].id
 
     useStore.getState().closeProject(id)
@@ -93,10 +91,10 @@ describe('Projects', () => {
     expect(useStore.getState().activeProjectId).toBe(id)
   })
 
-  it('reorderProjects updates order', () => {
-    useStore.getState().addProject('A', '/tmp/a')
-    useStore.getState().addProject('B', '/tmp/b')
-    useStore.getState().addProject('C', '/tmp/c')
+  it('reorderProjects updates order', async () => {
+    await useStore.getState().addProject('A', '/tmp/a')
+    await useStore.getState().addProject('B', '/tmp/b')
+    await useStore.getState().addProject('C', '/tmp/c')
     const [a, b, c] = useStore.getState().projects
 
     useStore.getState().reorderProjects([c.id, a.id, b.id])
@@ -113,8 +111,8 @@ describe('Projects', () => {
 describe('Tasks', () => {
   let projectId: string
 
-  beforeEach(() => {
-    useStore.getState().addProject('Test', '/tmp/test')
+  beforeEach(async () => {
+    await useStore.getState().addProject('Test', '/tmp/test')
     projectId = useStore.getState().projects[0].id
   })
 
@@ -216,8 +214,8 @@ describe('Labels', () => {
     expect(updated.color).toBe('#fff')
   })
 
-  it('deleteLabel removes label and strips it from tasks', () => {
-    useStore.getState().addProject('P', '/tmp/p')
+  it('deleteLabel removes label and strips it from tasks', async () => {
+    await useStore.getState().addProject('P', '/tmp/p')
     const pid = useStore.getState().projects[0].id
     const task = useStore.getState().addTask(pid, 'Task', 'todo')
 
@@ -256,11 +254,11 @@ describe('Layouts', () => {
 })
 
 describe('Targeted persistence', () => {
-  it('addProject calls dbUpsertProject and dbSetAppState', () => {
+  it('addProject calls dbUpsertProject and dbSetAppState', async () => {
     (electron.dbUpsertProject as ReturnType<typeof import('vitest').vi.fn>).mockClear();
     (electron.dbSetAppState as ReturnType<typeof import('vitest').vi.fn>).mockClear()
 
-    useStore.getState().addProject('Test', '/tmp')
+    await useStore.getState().addProject('Test', '/tmp')
 
     expect(useStore.getState().projects).toHaveLength(1)
     expect(electron.dbUpsertProject).toHaveBeenCalledTimes(1)
@@ -283,10 +281,10 @@ describe('Targeted persistence', () => {
     expect(electron.dbSetAppState).toHaveBeenCalledWith('activeProjectId', 'proj-123')
   })
 
-  it('reorderTasks calls dbBatchUpsertTasks', () => {
+  it('reorderTasks calls dbBatchUpsertTasks', async () => {
     (electron.dbBatchUpsertTasks as ReturnType<typeof import('vitest').vi.fn>).mockClear()
 
-    useStore.getState().addProject('P', '/tmp/p')
+    await useStore.getState().addProject('P', '/tmp/p')
     const pid = useStore.getState().projects[0].id
     const t1 = useStore.getState().addTask(pid, 'A', 'todo')
     const t2 = useStore.getState().addTask(pid, 'B', 'todo');

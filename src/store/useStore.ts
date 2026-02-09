@@ -10,7 +10,7 @@ interface AppState extends AppData {
   loadData: () => Promise<void>
 
   // Projects
-  addProject: (name: string, path: string) => void
+  addProject: (name: string, path: string) => Promise<void>
   updateProject: (id: string, updates: Partial<Project>) => void
   deleteProject: (id: string) => void
   closeProject: (id: string) => void
@@ -65,7 +65,46 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Projects
-  addProject: (name, path) => {
+  addProject: async (name, path) => {
+    // Check if a project with this path already exists (in-memory first, then DB)
+    const existing = get().projects.find((p) => p.path === path)
+    if (existing) {
+      // Reopen if closed, set active, update name if different
+      const updates: Partial<Project> = {}
+      if (existing.name !== name) updates.name = name
+      set((state) => ({
+        projects: Object.keys(updates).length > 0
+          ? state.projects.map((p) => p.id === existing.id ? { ...p, ...updates } : p)
+          : state.projects,
+        closedProjectIds: state.closedProjectIds.filter((id) => id !== existing.id),
+        activeProjectId: existing.id
+      }))
+      if (Object.keys(updates).length > 0) {
+        const updated = get().projects.find((p) => p.id === existing.id)
+        if (updated) electron.dbUpsertProject(updated)
+      }
+      electron.dbSetAppState('activeProjectId', existing.id)
+      electron.dbSetAppState('closedProjectIds', JSON.stringify(get().closedProjectIds))
+      return
+    }
+
+    // Check DB for a project that was deleted from memory but still has data
+    const dbProject = await electron.dbGetProjectByPath(path)
+    if (dbProject) {
+      // Restore from DB — reuse same ID so existing tasks reconnect
+      const restored: Project = { ...dbProject, name, order: get().projects.length }
+      set((state) => ({
+        projects: [...state.projects, restored],
+        closedProjectIds: state.closedProjectIds.filter((id) => id !== restored.id),
+        activeProjectId: restored.id
+      }))
+      electron.dbUpsertProject(restored)
+      electron.dbSetAppState('activeProjectId', restored.id)
+      electron.dbSetAppState('closedProjectIds', JSON.stringify(get().closedProjectIds))
+      return
+    }
+
+    // Truly new project
     const newProject: Project = {
       id: uuidv4(),
       name,

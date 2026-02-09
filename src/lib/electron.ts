@@ -76,6 +76,7 @@ declare global {
       // Targeted database operations
       dbSaveLayout: (projectId: string, layout: unknown) => Promise<boolean>
       dbSetAppState: (key: string, value: string | null) => Promise<boolean>
+      dbGetProjectByPath: (path: string) => Promise<{ id: string; name: string; path: string; order: number } | null>
       dbUpsertProject: (project: { id: string; name: string; path: string; order: number }) => Promise<boolean>
       dbDeleteProject: (id: string) => Promise<boolean>
       dbUpsertTask: (task: { id: string; projectId: string; title: string; description: string; column: string; labels: string[]; dueDate: string | null; createdAt: string; order: number; branch?: string; archived?: boolean; attachments?: unknown[] }) => Promise<boolean>

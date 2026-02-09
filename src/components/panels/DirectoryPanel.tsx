@@ -67,6 +67,12 @@ function FileTreeItem({
       <div
         className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-dark-hover rounded text-sm group ${isSelected ? 'bg-blue-500/20' : ''}`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        draggable="true"
+        onDragStart={(e) => {
+          e.dataTransfer.setData('application/x-kanban-file', node.path)
+          e.dataTransfer.setData('text/plain', node.path)
+          e.dataTransfer.effectAllowed = 'copy'
+        }}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onContextMenu={(e) => onContextMenu(e, node)}

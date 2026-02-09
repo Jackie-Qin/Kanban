@@ -16,6 +16,7 @@ const mockElectron = {
   // Targeted database operations
   dbSaveLayout: vi.fn().mockResolvedValue(true),
   dbSetAppState: vi.fn().mockResolvedValue(true),
+  dbGetProjectByPath: vi.fn().mockResolvedValue(null),
   dbUpsertProject: vi.fn().mockResolvedValue(true),
   dbDeleteProject: vi.fn().mockResolvedValue(true),
   dbUpsertTask: vi.fn().mockResolvedValue(true),

@@ -30,7 +30,7 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      path TEXT NOT NULL,
+      path TEXT NOT NULL UNIQUE,
       "order" INTEGER NOT NULL DEFAULT 0
     );
 
@@ -71,6 +71,19 @@ export function initDatabase() {
   const versionRow = db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined
   if (!versionRow) {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(1)
+  }
+
+  // Schema migration v2: add UNIQUE constraint on projects.path
+  const currentVersion = (db.prepare('SELECT version FROM schema_version').get() as { version: number }).version
+  if (currentVersion < 2) {
+    db.transaction(() => {
+      // Check if the unique index already exists
+      const idx = db!.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='projects_path_unique'").get()
+      if (!idx) {
+        db!.exec('CREATE UNIQUE INDEX projects_path_unique ON projects(path)')
+      }
+      db!.prepare('UPDATE schema_version SET version = 2').run()
+    })()
   }
 
   // Migrate from data.json if database is empty and data.json exists
@@ -168,6 +181,10 @@ export function closeDatabase() {
 
 export function getAllProjects() {
   return getDb().prepare('SELECT id, name, path, "order" FROM projects ORDER BY "order"').all()
+}
+
+export function getProjectByPath(path: string) {
+  return getDb().prepare('SELECT id, name, path, "order" FROM projects WHERE path = ?').get(path) as { id: string; name: string; path: string; order: number } | undefined
 }
 
 export function upsertProject(project: { id: string; name: string; path: string; order: number }) {

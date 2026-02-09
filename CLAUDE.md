@@ -38,6 +38,7 @@ Note: The app uses GitHub API to check for updates (no auto-update). Users must 
 
 ## Key Architecture Rules
 
+- **Project path is the single source of truth** - The `projects.path` column has a UNIQUE constraint. `addProject` checks for an existing project at the same path (in-memory, then DB) before creating a new one. If found, it reuses the existing project ID so tasks stay connected. This prevents orphaned tasks from project re-creation.
 - **Terminal should never refresh** - Terminals persist across project switches. The `TerminalDockPanel` keeps PTY processes alive by rendering all project terminals and hiding inactive ones with CSS visibility.
 - **Git panel must handle project switching reliably** - The `GitPanel` uses both React params and dockview `onDidParametersChange` API to detect project switches. Stale async responses are guarded by comparing `activePathRef.current` against the path at fetch start. All state is cleared on project switch.
 - **Git panel polls for working tree changes** - The `.git` watcher only detects index/ref changes (commits, staging). Working tree edits (file saves) require a 3-second polling interval via `setInterval(fetchData, 3000)`.
