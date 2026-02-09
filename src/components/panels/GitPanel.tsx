@@ -864,11 +864,8 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
         >
           <div className="flex items-center gap-2.5 mb-2">
             {(() => {
-              // Try GitHub username from noreply email, fall back to author name
-              const email = hoveredCommit.commit.authorEmail || ''
-              const noreplyMatch = email.match(/^(\d+\+)?(.+)@users\.noreply\.github\.com$/)
-              const githubUsername = noreplyMatch ? noreplyMatch[2] : hoveredCommit.commit.author
-              const initials = hoveredCommit.commit.author.charAt(0).toUpperCase()
+              const githubUsername = hoveredCommit.commit.author
+              const initials = githubUsername.charAt(0).toUpperCase()
               return (
                 <div className="w-8 h-8 flex-shrink-0 relative">
                   <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-medium">

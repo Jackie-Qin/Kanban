@@ -138,6 +138,23 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   const diffEditorRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const monacoRef = useRef<any>(null)
+  const saveFileRef = useRef<() => void>(() => {})
+  const openFilesRef = useRef(openFiles)
+  openFilesRef.current = openFiles
+  const editorAreaRef = useRef<HTMLDivElement>(null)
+  const [editorAreaHeight, setEditorAreaHeight] = useState(0)
+
+  // Measure the editor area container in pixels (avoids CSS percentage height issues)
+  useEffect(() => {
+    const el = editorAreaRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const h = Math.floor(entries[0]?.contentRect.height ?? 0)
+      setEditorAreaHeight((prev) => prev === h ? prev : h)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // Per-project editor state cache
   const projectStateCache = useRef<Map<string, { openFiles: OpenFile[]; activeFilePath: string | null }>>(new Map())
@@ -181,28 +198,24 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
 
   const openFile = useCallback(
     async (filePath: string, isPreview: boolean, showDiff = false, gitProjectPath?: string, gitRelativePath?: string, lineNumber?: number) => {
-      // Check if file is already open
-      const existingIndex = openFiles.findIndex((f) => f.path === filePath)
+      // Check if file is already open (read from ref to avoid stale closure)
+      const currentFiles = openFilesRef.current
+      const existingIndex = currentFiles.findIndex((f) => f.path === filePath)
       if (existingIndex !== -1) {
-        // If already open, just make it active
-        setActiveFilePath(filePath)
-        // If opening permanently, convert from preview
-        // Also update showDiff state if needed
-        const existingFile = openFiles[existingIndex]
+        const existingFile = currentFiles[existingIndex]
 
-        // If toggling diff mode, fetch git original if needed
+        // Fetch gitOriginal BEFORE state updates to avoid two-phase render
+        let newGitOriginal = existingFile.gitOriginal
         if (showDiff && !existingFile.gitOriginal && gitProjectPath && gitRelativePath) {
-          const gitOriginal = await electron.gitShowFile(gitProjectPath, gitRelativePath)
-          setOpenFiles((prev) =>
-            prev.map((f) => (f.path === filePath ? { ...f, isPreview: isPreview ? f.isPreview : false, showDiff, gitOriginal: gitOriginal ?? '' } : f))
-          )
-        } else {
-          setOpenFiles((prev) =>
-            prev.map((f) => (f.path === filePath ? { ...f, isPreview: isPreview ? f.isPreview : false, showDiff } : f))
-          )
+          newGitOriginal = (await electron.gitShowFile(gitProjectPath, gitRelativePath)) ?? ''
         }
 
-        // Jump to line if specified
+        // Batch state updates (no await between them)
+        setActiveFilePath(filePath)
+        setOpenFiles((prev) =>
+          prev.map((f) => (f.path === filePath ? { ...f, isPreview: isPreview ? f.isPreview : false, showDiff, ...(newGitOriginal !== undefined ? { gitOriginal: newGitOriginal } : {}) } : f))
+        )
+
         if (lineNumber) {
           jumpToLine(lineNumber)
         }
@@ -294,7 +307,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
         jumpToLine(lineNumber)
       }
     },
-    [openFiles, jumpToLine]
+    [jumpToLine]
   )
 
   // Keep a ref to the latest openFile so the event listener is never stale
@@ -355,6 +368,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
       )
     }
   }, [activeFile])
+  saveFileRef.current = saveFile
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
@@ -408,7 +422,8 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   useEffect(() => {
     const editor = editorRef.current
     if (!editor) return
-    const container = editor.getDomNode()?.parentElement
+    let container: HTMLElement | null | undefined
+    try { container = editor.getDomNode()?.parentElement } catch { return }
     if (!container) return
     let timer: ReturnType<typeof setTimeout> | null = null
     const ro = new ResizeObserver(() => {
@@ -426,7 +441,8 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   useEffect(() => {
     const editor = diffEditorRef.current
     if (!editor) return
-    const container = editor.getDomNode()?.parentElement
+    let container: HTMLElement | null | undefined
+    try { container = editor.getDomNode()?.parentElement } catch { return }
     if (!container) return
     let timer: ReturnType<typeof setTimeout> | null = null
     const ro = new ResizeObserver(() => {
@@ -442,6 +458,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
 
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
+    diffEditorRef.current = null // Clear stale diff editor ref
     monacoRef.current = monaco
 
     // Configure editor theme with neutral dark gray
@@ -465,7 +482,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
 
     // Add save shortcut
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      saveFile()
+      saveFileRef.current()
     })
 
     // Force initial layout — the ResizeObserver effect may have run before
@@ -494,6 +511,24 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [saveFile, closeFile, activeFilePath])
+
+  // Re-layout editors when panel becomes active (fixes zero-dimension rendering)
+  useEffect(() => {
+    const disposable = props.api.onDidActiveChange((e) => {
+      if (e.isActive) {
+        requestAnimationFrame(() => {
+          editorRef.current?.layout()
+          diffEditorRef.current?.layout()
+        })
+        // Delayed retry for when dockview hasn't finalized dimensions yet
+        setTimeout(() => {
+          editorRef.current?.layout()
+          diffEditorRef.current?.layout()
+        }, 50)
+      }
+    })
+    return () => disposable.dispose()
+  }, [props.api])
 
   // Expose openFile method globally for Directory panel
   useEffect(() => {
@@ -605,7 +640,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
       )}
 
       {/* Editor area */}
-      <div className="flex-1 min-h-0">
+      <div ref={editorAreaRef} className="flex-1 min-h-0">
         {activeFile ? (
           activeFile.isImage && activeFile.imageDataUrl ? (
             <div className="h-full flex items-center justify-center overflow-auto bg-[#1a1a1a] p-8">
@@ -617,44 +652,46 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
               />
             </div>
           ) : activeFile.showDiff && activeFile.gitOriginal !== undefined ? (
-            <div className="h-full">
-              <DiffEditor
-                height="100%"
-                language={getLanguage(activeFile.name)}
-                original={activeFile.gitOriginal}
-                modified={activeFile.content}
-                onMount={(editor, monaco) => {
-                  diffEditorRef.current = editor
-                  monacoRef.current = monaco
-                  monaco.editor.defineTheme('kanban-dark', {
-                    base: 'vs-dark',
-                    inherit: true,
-                    rules: [],
-                    colors: {
-                      'editor.background': '#1a1a1a',
-                      'diffEditor.insertedTextBackground': '#22c55e20',
-                      'diffEditor.removedTextBackground': '#ef444420'
-                    }
-                  })
-                  monaco.editor.setTheme('kanban-dark')
-                  requestAnimationFrame(() => editor.layout())
-                  setEditorMounted(c => c + 1)
-                }}
-                options={{
-                  fontSize: 13,
-                  fontFamily: 'Menlo, Monaco, "SF Mono", "Fira Code", Consolas, monospace',
-                  readOnly: true,
-                  renderSideBySide: diffViewMode === 'split',
-                  scrollBeyondLastLine: false,
-                  automaticLayout: false,
-                  padding: { top: 8, bottom: 8 }
-                }}
-                theme="vs-dark"
-              />
-            </div>
+            <DiffEditor
+              key={activeFile.path}
+              height={editorAreaHeight || '100%'}
+              language={getLanguage(activeFile.name)}
+              original={activeFile.gitOriginal}
+              modified={activeFile.content}
+              loading={<div className="h-full flex items-center justify-center text-dark-muted text-sm">Loading diff...</div>}
+              onMount={(editor, monaco) => {
+                diffEditorRef.current = editor
+                editorRef.current = null // Clear stale regular editor ref
+                monacoRef.current = monaco
+                monaco.editor.defineTheme('kanban-dark', {
+                  base: 'vs-dark',
+                  inherit: true,
+                  rules: [],
+                  colors: {
+                    'editor.background': '#1a1a1a',
+                    'diffEditor.insertedTextBackground': '#22c55e20',
+                    'diffEditor.removedTextBackground': '#ef444420'
+                  }
+                })
+                monaco.editor.setTheme('kanban-dark')
+                requestAnimationFrame(() => editor.layout())
+                setTimeout(() => editor.layout(), 100)
+                setEditorMounted(c => c + 1)
+              }}
+              options={{
+                fontSize: 13,
+                fontFamily: 'Menlo, Monaco, "SF Mono", "Fira Code", Consolas, monospace',
+                readOnly: true,
+                renderSideBySide: diffViewMode === 'split',
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                padding: { top: 8, bottom: 8 }
+              }}
+              theme="vs-dark"
+            />
           ) : (
             <Editor
-              height="100%"
+              height={editorAreaHeight || '100%'}
               language={getLanguage(activeFile.name)}
               value={activeFile.content}
               onChange={handleEditorChange}
