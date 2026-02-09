@@ -115,7 +115,78 @@ button:focus {
   animation: slideUp 0.2s ease-out;
 }
 
-/* Dockview Dark Theme Customization - Neutral Gray */
+/* ===== Activity Bar ===== */
+.activity-bar {
+  width: 48px;
+  min-width: 48px;
+  height: 100%;
+  background-color: #1a1a1a;
+  border-right: 1px solid #3a3a3a;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.activity-bar-top,
+.activity-bar-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.activity-bar-icon {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #888888;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.activity-bar-icon:hover {
+  color: #e0e0e0;
+  background-color: #2d2d2d;
+}
+
+.activity-bar-icon.open {
+  color: #c0c0c0;
+}
+
+.activity-bar-icon.active {
+  color: #e0e0e0;
+}
+
+/* Left accent bar for active panel */
+.activity-bar-icon.active::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background-color: #6366f1;
+  border-radius: 1px;
+}
+
+.activity-bar-icon.reset {
+  color: #6366f1;
+}
+
+.activity-bar-icon.reset:hover {
+  color: #818cf8;
+  background-color: #2d2d2d;
+}
+
+/* ===== Dockview Dark Theme ===== */
 .dockview-theme-dark {
   --dv-tabs-and-actions-container-background-color: #242424;
   --dv-tab-background-color: #242424;
@@ -123,7 +194,7 @@ button:focus {
   --dv-activegroup-hiddenpanel-tab-background-color: #242424;
   --dv-inactivegroup-visiblepanel-tab-background-color: #2d2d2d;
   --dv-inactivegroup-hiddenpanel-tab-background-color: #242424;
-  --dv-tab-divider-color: #3a3a3a;
+  --dv-tab-divider-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: #e0e0e0;
   --dv-activegroup-hiddenpanel-tab-color: #888888;
   --dv-inactivegroup-visiblepanel-tab-color: #e0e0e0;
@@ -138,13 +209,9 @@ button:focus {
   --dv-drag-over-border-color: #6366f1;
 }
 
-.dockview-theme-dark .tab {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.dockview-theme-dark .dv-tabs-container {
-  border-bottom: 1px solid #3a3a3a;
+/* Hide all dockview tab bars — activity bar handles all panel switching */
+.dockview-theme-dark .dv-tabs-and-actions-container {
+  display: none;
 }
 
 .dockview-theme-dark .dv-resize-handle-horizontal,

@@ -58,6 +58,6 @@ export const COLUMNS: Column[] = [
   { id: 'backlog', title: 'Backlog', color: '#6b7280' },
   { id: 'todo', title: 'Todo', color: '#eab308' },
   { id: 'in-progress', title: 'In Progress', color: '#a855f7' },
-  { id: 'review', title: 'Review', color: '#22c55e' },
+  { id: 'review', title: 'Review', color: '#3b82f6' },
   { id: 'done', title: 'Done', color: '#10b981' }
 ]
