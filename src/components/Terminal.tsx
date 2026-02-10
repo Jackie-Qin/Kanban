@@ -37,9 +37,15 @@ export default function Terminal({
   const lastDataRef = useRef(0)
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isOutputActiveRef = useRef(false)
+  // Explicit user-scroll tracking: true only when the user intentionally
+  // scrolled up.  Set by xterm's onScroll event, cleared when viewport
+  // reaches the bottom again.  This replaces the fragile
+  // `viewportY >= baseY` snapshot that could give false negatives after
+  // buffer reflow (the root cause of the split-view "jump to top" bug).
+  const userScrolledUpRef = useRef(false)
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
-  // Fit terminal to container, only scroll to bottom if already there
+  // Fit terminal to container, scroll to bottom unless user scrolled up
   const fitTerminal = useCallback(() => {
     if (fitAddonRef.current && xtermRef.current && terminalRef.current) {
       const { offsetWidth, offsetHeight } = terminalRef.current
@@ -47,9 +53,6 @@ export default function Terminal({
       if (offsetWidth >= 50 && offsetHeight >= 50) {
         try {
           const term = xtermRef.current
-          const buf = term.buffer.active
-          // Check if viewport is already at the bottom before resizing
-          const wasAtBottom = buf.viewportY >= buf.baseY
 
           fitAddonRef.current.fit()
           const { cols, rows } = term
@@ -58,12 +61,10 @@ export default function Terminal({
             electron.ptyResize(terminalId, cols, rows)
           }
 
-          // Only snap to bottom if we were already there — avoids
-          // creating blank space when content is sparse.
-          // Defer scrollToBottom so xterm's internal buffer reflow
-          // (triggered by fit()) completes first — otherwise viewportY
-          // can land at a stale position, causing a "jump to top".
-          if (wasAtBottom) {
+          // Always snap to bottom after fit() unless the user has
+          // intentionally scrolled up.  Deferred one frame so xterm's
+          // internal buffer reflow (triggered by fit()) completes first.
+          if (!userScrolledUpRef.current) {
             requestAnimationFrame(() => {
               term.scrollToBottom()
             })
@@ -124,6 +125,14 @@ export default function Terminal({
 
     xtermRef.current = xterm
     fitAddonRef.current = fitAddon
+
+    // Track user scroll: set flag when user scrolls away from bottom,
+    // clear it when they scroll back down.  This drives fitTerminal's
+    // decision to auto-scroll, replacing the old viewportY>=baseY snapshot.
+    const scrollDisposable = xterm.onScroll(() => {
+      const buf = xterm.buffer.active
+      userScrolledUpRef.current = buf.viewportY < buf.baseY
+    })
 
     // Link provider: clickable [Image #N] references
     const imageLinkDisposable = xterm.registerLinkProvider({
@@ -260,6 +269,7 @@ export default function Terminal({
         if (hotkeys.matchesEvent('clear-terminal', e)) {
           e.preventDefault()
           xterm.clear()
+          userScrolledUpRef.current = false
           xterm.scrollToBottom()
           return false
         }
@@ -318,6 +328,7 @@ export default function Terminal({
         }
 
         // Ensure terminal is scrolled to bottom after init/restore
+        userScrolledUpRef.current = false
         xtermRef.current?.scrollToBottom()
       }
     }, 100)
@@ -339,6 +350,7 @@ export default function Terminal({
       unsubscribeData()
       unsubscribeExit()
       dataDisposable.dispose()
+      scrollDisposable.dispose()
       imageLinkDisposable.dispose()
       filePathLinkDisposable.dispose()
 
