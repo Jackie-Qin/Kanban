@@ -7,6 +7,7 @@ import TaskModal from './components/TaskModal'
 import SettingsModal from './components/SettingsModal'
 import SearchModal from './components/SearchModal'
 import UpdateNotification from './components/UpdateNotification'
+import TerminalNotification from './components/TerminalNotification'
 import { Task } from './types'
 import { electron } from './lib/electron'
 import { useTerminalSettings } from './store/useTerminalSettings'
@@ -207,6 +208,7 @@ export default function App() {
       )}
 
       <UpdateNotification />
+      <TerminalNotification />
     </div>
   )
 }

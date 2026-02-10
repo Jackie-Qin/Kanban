@@ -9,9 +9,13 @@ import { getThemeByName } from '../lib/terminalThemes'
 import { eventBus } from '../lib/eventBus'
 import { useHotkeySettings } from '../store/useHotkeySettings'
 
+const IDLE_TIMEOUT_MS = 5000       // 5s of silence after activity = "done"
+const MIN_ACTIVE_DURATION_MS = 10000 // Must have 10s+ of output to trigger notification
+
 interface TerminalProps {
   terminalId: string
   projectPath: string
+  terminalName: string
   isActive: boolean
   onSelect: () => void
 }
@@ -19,6 +23,7 @@ interface TerminalProps {
 export default function Terminal({
   terminalId,
   projectPath,
+  terminalName,
   isActive,
   onSelect
 }: TerminalProps) {
@@ -28,6 +33,10 @@ export default function Terminal({
   const webglAddonRef = useRef<WebglAddon | null>(null)
   const serializeAddonRef = useRef<SerializeAddon | null>(null)
   const ptyCreatedRef = useRef(false)
+  const activityStartRef = useRef(0)
+  const lastDataRef = useRef(0)
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isOutputActiveRef = useRef(false)
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
   // Fit terminal to container, only scroll to bottom if already there
@@ -208,6 +217,25 @@ export default function Terminal({
     const unsubscribeData = electron.onPtyData(({ terminalId: tid, data }) => {
       if (tid === terminalId && xtermRef.current) {
         xtermRef.current.write(data)
+
+        // Idle detection: track output activity to notify when a long task finishes
+        const now = Date.now()
+        if (!isOutputActiveRef.current) {
+          activityStartRef.current = now
+          isOutputActiveRef.current = true
+        }
+        lastDataRef.current = now
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = setTimeout(() => {
+          if (isOutputActiveRef.current) {
+            const duration = lastDataRef.current - activityStartRef.current
+            if (duration >= MIN_ACTIVE_DURATION_MS) {
+              const projectName = projectPath.split('/').pop() || projectPath
+              eventBus.emit('terminal:activity-done', { terminalId, terminalName, projectName })
+            }
+            isOutputActiveRef.current = false
+          }
+        }, IDLE_TIMEOUT_MS)
       }
     })
 
@@ -301,6 +329,7 @@ export default function Terminal({
     return () => {
       clearTimeout(initTimeout)
       if (resizeTimer) clearTimeout(resizeTimer)
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
       resizeObserver.disconnect()
       unsubscribeData()
       unsubscribeExit()
@@ -445,8 +474,7 @@ export default function Terminal({
       <div
         className="flex-1 min-h-0 w-full"
         style={{
-          padding: '8px 0 8px 12px',
-          minHeight: '100px',
+          padding: '8px 0 0 12px',
           backgroundColor: bgColor
         }}
       >

@@ -355,6 +355,7 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
                       <Terminal
                         terminalId={terminal.id}
                         projectPath={state.projectPath}
+                        terminalName={terminal.name}
                         isActive={isCurrentProject && state.activeTerminalId === terminal.id}
                         onSelect={() => setActiveTerminalId(terminal.id)}
                       />
@@ -376,6 +377,7 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
                         <Terminal
                           terminalId={terminal.id}
                           projectPath={state.projectPath}
+                          terminalName={terminal.name}
                           isActive={isCurrentProject && isActiveTerminal}
                           onSelect={() => setActiveTerminalId(terminal.id)}
                         />

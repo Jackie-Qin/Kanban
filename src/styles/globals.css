@@ -10,6 +10,11 @@
   box-sizing: border-box;
 }
 
+/* Fill container so viewport background covers fractional-row gap at bottom */
+.xterm {
+  height: 100% !important;
+}
+
 /* Ensure xterm canvas renders properly */
 .xterm .xterm-screen canvas {
   display: block;
@@ -127,6 +132,28 @@ button:focus {
 
 .animate-slideUp {
   animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(40px);
+  }
 }
 
 /* ===== Activity Bar ===== */
