@@ -8,7 +8,7 @@ import {
   useSensor,
   useSensors
 } from '@dnd-kit/core'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { COLUMNS, Task, ColumnId } from '../types'
 import Column from './Column'
@@ -25,6 +25,7 @@ export default function KanbanBoard({ projectId, projectPath, onTaskClick, onBra
   const { tasks, moveTask, reorderTasks } = useStore()
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  const lastDragOverRef = useRef<{ taskId: string; column: ColumnId } | null>(null)
 
   const projectTasks = tasks.filter((t) => t.projectId === projectId && (showArchived || !t.archived))
   const archivedCount = tasks.filter((t) => t.projectId === projectId && t.archived).length
@@ -40,6 +41,7 @@ export default function KanbanBoard({ projectId, projectPath, onTaskClick, onBra
   const handleDragStart = (event: DragStartEvent) => {
     const task = projectTasks.find((t) => t.id === event.active.id)
     if (task) {
+      lastDragOverRef.current = null
       setActiveTask(task)
     }
   }
@@ -54,23 +56,36 @@ export default function KanbanBoard({ projectId, projectPath, onTaskClick, onBra
     const activeTask = projectTasks.find((t) => t.id === activeId)
     if (!activeTask) return
 
-    // Check if dropping over a column
+    // Determine target column
+    let targetColumn: ColumnId | null = null
+    let targetOrder = 0
+
     const overColumn = COLUMNS.find((c) => c.id === overId)
     if (overColumn && activeTask.column !== overColumn.id) {
-      moveTask(activeId, overColumn.id, 0)
-      return
+      targetColumn = overColumn.id
+      targetOrder = 0
+    } else {
+      const overTask = projectTasks.find((t) => t.id === overId)
+      if (overTask && activeTask.column !== overTask.column) {
+        targetColumn = overTask.column
+        targetOrder = overTask.order
+      }
     }
 
-    // Check if dropping over another task
-    const overTask = projectTasks.find((t) => t.id === overId)
-    if (overTask && activeTask.column !== overTask.column) {
-      moveTask(activeId, overTask.column, overTask.order)
-    }
+    if (!targetColumn) return
+
+    // Skip if we already moved this task to this column in this drag
+    const last = lastDragOverRef.current
+    if (last && last.taskId === activeId && last.column === targetColumn) return
+
+    lastDragOverRef.current = { taskId: activeId, column: targetColumn }
+    moveTask(activeId, targetColumn, targetOrder)
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     setActiveTask(null)
+    lastDragOverRef.current = null
 
     if (!over) return
 
