@@ -59,9 +59,14 @@ export default function Terminal({
           }
 
           // Only snap to bottom if we were already there — avoids
-          // creating blank space when content is sparse
+          // creating blank space when content is sparse.
+          // Defer scrollToBottom so xterm's internal buffer reflow
+          // (triggered by fit()) completes first — otherwise viewportY
+          // can land at a stale position, causing a "jump to top".
           if (wasAtBottom) {
-            term.scrollToBottom()
+            requestAnimationFrame(() => {
+              term.scrollToBottom()
+            })
           }
         } catch (e) {
           console.error(`[Terminal] Failed to fit:`, e)

@@ -194,9 +194,16 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
 
     const setActiveTerminalId = useCallback(
       (id: string) => {
-        updateCurrentProjectState(() => ({ activeTerminalId: id }))
+        // Skip state update if already active — avoids unnecessary re-renders
+        // that can cascade into fitTerminal calls and viewport scroll glitches
+        setProjectStates(prev => {
+          const current = prev[projectId]
+          if (current && current.activeTerminalId === id) return prev
+          const base = current || currentState
+          return { ...prev, [projectId]: { ...base, activeTerminalId: id } }
+        })
       },
-      [updateCurrentProjectState]
+      [projectId, currentState]
     )
 
     const setIsSplitView = useCallback(
