@@ -106,17 +106,24 @@ export default function Terminal({
     xterm.open(container)
 
     // WebGL renderer: renders block/box characters as filled rects (no gaps)
-    try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        try { webglAddon.dispose() } catch { /* already disposed */ }
-        webglAddonRef.current = null
-      })
-      xterm.loadAddon(webglAddon)
-      webglAddonRef.current = webglAddon
-    } catch {
-      // Falls back to canvas renderer if WebGL unavailable
+    const loadWebgl = (term: XTerm) => {
+      try {
+        const addon = new WebglAddon()
+        addon.onContextLoss(() => {
+          try { addon.dispose() } catch { /* already disposed */ }
+          webglAddonRef.current = null
+          // Attempt to recreate after context loss
+          setTimeout(() => {
+            if (xtermRef.current) loadWebgl(xtermRef.current)
+          }, 100)
+        })
+        term.loadAddon(addon)
+        webglAddonRef.current = addon
+      } catch {
+        // Falls back to canvas renderer if WebGL unavailable
+      }
     }
+    loadWebgl(xterm)
 
     // Serialize addon for buffer persistence
     const serializeAddon = new SerializeAddon()
@@ -396,9 +403,13 @@ export default function Terminal({
   }, [themeName, fontSize, fontFamily, fitTerminal])
 
   // Focus when active — fitTerminal handles fit + deferred scroll to bottom
+  // Also clear WebGL texture atlas to fix garbled rendering after visibility changes
   useEffect(() => {
     if (isActive && xtermRef.current) {
       xtermRef.current.focus()
+      if (webglAddonRef.current) {
+        try { webglAddonRef.current.clearTextureAtlas() } catch { /* ignore */ }
+      }
       requestAnimationFrame(() => {
         fitTerminal()
       })
