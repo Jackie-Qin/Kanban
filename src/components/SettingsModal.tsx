@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { electron } from '../lib/electron'
 import { useTerminalSettings } from '../store/useTerminalSettings'
+import { useHotkeySettings } from '../store/useHotkeySettings'
 import { terminalThemes, FONT_FAMILIES, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../lib/terminalThemes'
+import { HOTKEY_ACTIONS, formatBinding, bindingsEqual, getDefaultBinding, KeyBinding } from '../lib/hotkeys'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -23,12 +25,15 @@ const PRESET_COLORS = [
 export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { labels, addLabel, updateLabel, deleteLabel } = useStore()
   const { themeName, fontSize, fontFamily, setTheme, setFontSize, setFontFamily } = useTerminalSettings()
+  const { getBinding, setBinding, resetBinding } = useHotkeySettings()
   const [newLabelName, setNewLabelName] = useState('')
   const [newLabelColor, setNewLabelColor] = useState(PRESET_COLORS[0])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState('')
   const [zoomPercent, setZoomPercent] = useState(100)
+  const [recordingActionId, setRecordingActionId] = useState<string | null>(null)
+  const recordingRef = useRef<string | null>(null)
 
   // Load current app zoom on mount
   useEffect(() => {
@@ -43,8 +48,39 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     electron.setAppZoom(clamped / 100)
   }, [])
 
+  // Keep ref in sync so the recording handler can read it
+  recordingRef.current = recordingActionId
+
+  // Hotkey recording: capture next key combo when in recording mode
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const actionId = recordingRef.current
+      if (actionId) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        // ESC cancels recording
+        if (e.key === 'Escape') {
+          setRecordingActionId(null)
+          return
+        }
+
+        // Ignore standalone modifier keys
+        if (['Meta', 'Shift', 'Alt', 'Control'].includes(e.key)) return
+
+        const binding: KeyBinding = {
+          key: e.key.length === 1 ? e.key.toLowerCase() : e.key,
+          ...(e.metaKey && { meta: true }),
+          ...(e.shiftKey && { shift: true }),
+          ...(e.altKey && { alt: true }),
+          ...(e.ctrlKey && { ctrl: true }),
+        }
+        setBinding(actionId, binding)
+        setRecordingActionId(null)
+        return
+      }
+
+      // Normal ESC handling when not recording
       if (e.key === 'Escape') {
         if (editingId) {
           setEditingId(null)
@@ -53,9 +89,9 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         }
       }
     }
-    window.addEventListener('keydown', handleEsc)
-    return () => window.removeEventListener('keydown', handleEsc)
-  }, [onClose, editingId])
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [onClose, editingId, setBinding])
 
   const handleAddLabel = () => {
     if (newLabelName.trim()) {
@@ -229,6 +265,46 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                 </button>
               </div>
             </div>
+          </div>
+
+          <div className="border-t border-dark-border" />
+
+          {/* Hotkeys section */}
+          <h3 className="text-sm font-medium text-dark-muted">Keyboard Shortcuts</h3>
+
+          <div className="space-y-1">
+            {HOTKEY_ACTIONS.map((action) => {
+              const currentBinding = getBinding(action.id)
+              const isDefault = bindingsEqual(currentBinding, getDefaultBinding(action.id))
+              const isRecording = recordingActionId === action.id
+
+              return (
+                <div key={action.id} className="flex items-center justify-between p-2 bg-dark-bg rounded-lg group">
+                  <span className="text-sm text-dark-text">{action.label}</span>
+                  <div className="flex items-center gap-1.5">
+                    {!isDefault && (
+                      <button
+                        onClick={() => resetBinding(action.id)}
+                        className="px-1.5 py-0.5 text-xs text-dark-muted hover:text-dark-text opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Reset to default"
+                      >
+                        Reset
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setRecordingActionId(isRecording ? null : action.id)}
+                      className={`px-2 py-0.5 text-xs font-mono rounded transition-colors min-w-[60px] text-center ${
+                        isRecording
+                          ? 'bg-blue-600/20 border border-blue-500 text-blue-400 animate-pulse'
+                          : `bg-dark-card border border-dark-border text-dark-muted hover:border-dark-muted ${!isDefault ? 'border-blue-500/40 text-blue-400' : ''}`
+                      }`}
+                    >
+                      {isRecording ? 'Press keys...' : formatBinding(currentBinding)}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
 
           <div className="border-t border-dark-border" />

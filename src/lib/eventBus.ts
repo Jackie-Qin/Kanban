@@ -13,6 +13,7 @@ type EventMap = {
   }
   'panel:focus': { panelId: string }
   'workspace:open-file': { filePath: string; line?: number }
+  'terminal:add': Record<string, never>
 }
 
 type Handler<T> = (data: T) => void

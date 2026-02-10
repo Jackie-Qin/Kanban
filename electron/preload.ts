@@ -232,6 +232,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchText: (projectPath: string, query: string): Promise<{ path: string; relativePath: string; line: number; content: string }[]> =>
     ipcRenderer.invoke('search-text', projectPath, query),
 
+  // Hotkey Settings methods
+  getHotkeySettings: (): Promise<Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>> =>
+    ipcRenderer.invoke('get-hotkey-settings'),
+  saveHotkeySettings: (overrides: Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>): Promise<boolean> =>
+    ipcRenderer.invoke('save-hotkey-settings', overrides),
+
   // App Zoom methods
   getAppZoom: (): Promise<number> => ipcRenderer.invoke('get-app-zoom'),
   setAppZoom: (factor: number): Promise<boolean> => ipcRenderer.invoke('set-app-zoom', factor),

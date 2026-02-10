@@ -152,6 +152,9 @@ declare global {
       // Search methods
       searchFiles: (projectPath: string, query: string) => Promise<SearchFileResult[]>
       searchText: (projectPath: string, query: string) => Promise<SearchTextResult[]>
+      // Hotkey Settings methods
+      getHotkeySettings: () => Promise<Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>>
+      saveHotkeySettings: (overrides: Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>) => Promise<boolean>
       // App Zoom methods
       getAppZoom: () => Promise<number>
       setAppZoom: (factor: number) => Promise<boolean>

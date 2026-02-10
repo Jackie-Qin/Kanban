@@ -7,6 +7,7 @@ import { electron } from '../lib/electron'
 import { useTerminalSettings } from '../store/useTerminalSettings'
 import { getThemeByName } from '../lib/terminalThemes'
 import { eventBus } from '../lib/eventBus'
+import { useHotkeySettings } from '../store/useHotkeySettings'
 
 interface TerminalProps {
   terminalId: string
@@ -29,21 +30,30 @@ export default function Terminal({
   const ptyCreatedRef = useRef(false)
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
-  // Fit terminal to container and scroll to bottom
+  // Fit terminal to container, only scroll to bottom if already there
   const fitTerminal = useCallback(() => {
     if (fitAddonRef.current && xtermRef.current && terminalRef.current) {
       const { offsetWidth, offsetHeight } = terminalRef.current
 
       if (offsetWidth >= 50 && offsetHeight >= 50) {
         try {
+          const term = xtermRef.current
+          const buf = term.buffer.active
+          // Check if viewport is already at the bottom before resizing
+          const wasAtBottom = buf.viewportY >= buf.baseY
+
           fitAddonRef.current.fit()
-          const { cols, rows } = xtermRef.current
+          const { cols, rows } = term
 
           if (ptyCreatedRef.current) {
             electron.ptyResize(terminalId, cols, rows)
           }
 
-          xtermRef.current.scrollToBottom()
+          // Only snap to bottom if we were already there — avoids
+          // creating blank space when content is sparse
+          if (wasAtBottom) {
+            term.scrollToBottom()
+          }
         } catch (e) {
           console.error(`[Terminal] Failed to fit:`, e)
         }
@@ -210,16 +220,19 @@ export default function Terminal({
 
     // Intercept app-level shortcuts so xterm doesn't consume them
     xterm.attachCustomKeyEventHandler((e) => {
-      if (e.type === 'keydown' && e.metaKey) {
-        // Cmd+K: clear terminal
-        if (e.key === 'k') {
+      if (e.type === 'keydown') {
+        const hotkeys = useHotkeySettings.getState()
+
+        // Clear terminal: handle inline since it needs xterm access
+        if (hotkeys.matchesEvent('clear-terminal', e)) {
           e.preventDefault()
           xterm.clear()
           xterm.scrollToBottom()
           return false
         }
-        // Cmd+Left/Right: let App handle project switching
-        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+
+        // Pass through any other app-level bound hotkeys
+        if (hotkeys.matchesAnyAction(e)) {
           return false
         }
       }

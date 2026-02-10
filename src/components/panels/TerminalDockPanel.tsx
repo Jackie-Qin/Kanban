@@ -2,6 +2,9 @@ import { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardR
 import { IDockviewPanelProps } from 'dockview'
 import Terminal from '../Terminal'
 import { electron } from '../../lib/electron'
+import { eventBus } from '../../lib/eventBus'
+import { useHotkeySettings } from '../../store/useHotkeySettings'
+import { formatBinding } from '../../lib/hotkeys'
 
 interface TerminalInfo {
   id: string
@@ -206,15 +209,15 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
     // Keyboard shortcuts for tab switching (⌘1, ⌘2, ⌘3)
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey) {
-          const keyNum = parseInt(e.key, 10)
-          if (keyNum >= 1 && keyNum <= 3) {
-            const targetIndex = keyNum - 1
+        const hotkeys = useHotkeySettings.getState()
+        for (let i = 0; i < 3; i++) {
+          if (hotkeys.matchesEvent(`terminal-${i + 1}`, e)) {
             const currentTerminals = terminalsRef.current
-            if (targetIndex < currentTerminals.length) {
+            if (i < currentTerminals.length) {
               e.preventDefault()
-              setActiveTerminalId(currentTerminals[targetIndex].id)
+              setActiveTerminalId(currentTerminals[i].id)
             }
+            return
           }
         }
       }
@@ -222,6 +225,13 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
       document.addEventListener('keydown', handleKeyDown)
       return () => document.removeEventListener('keydown', handleKeyDown)
     }, [setActiveTerminalId])
+
+    // Listen for terminal:add event (⌘T from App.tsx)
+    useEffect(() => {
+      return eventBus.on('terminal:add', () => {
+        addTerminal()
+      })
+    }, [addTerminal])
 
     return (
       <div className="h-full w-full flex flex-col bg-dark-bg">
@@ -239,7 +249,7 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
                 onClick={() => setActiveTerminalId(terminal.id)}
               >
                 <span className="font-medium">{terminal.name}</span>
-                <span className="text-xs text-dark-muted">⌘{index + 1}</span>
+                <span className="text-xs text-dark-muted">{formatBinding(useHotkeySettings.getState().getBinding(`terminal-${index + 1}`))}</span>
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -269,7 +279,7 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
               <button
                 onClick={addTerminal}
                 className="p-1.5 ml-1 text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors"
-                title="New terminal (max 3)"
+                title="New terminal ⌘T (max 3)"
               >
                 <svg
                   className="w-4 h-4"

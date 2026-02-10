@@ -203,6 +203,19 @@ export function registerDataHandlers() {
     return true
   })
 
+  // Hotkey Settings
+  ipcMain.handle('get-hotkey-settings', async () => {
+    const settings = await loadSettings()
+    return settings.hotkeyOverrides || {}
+  })
+
+  ipcMain.handle('save-hotkey-settings', async (_event, overrides: Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>) => {
+    const settings = await loadSettings()
+    settings.hotkeyOverrides = overrides
+    saveSettings(settings)
+    return true
+  })
+
   // App Zoom
   ipcMain.handle('get-app-zoom', () => {
     return getMainWindow()?.webContents.getZoomFactor() ?? 1

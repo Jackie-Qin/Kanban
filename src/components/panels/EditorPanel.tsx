@@ -3,6 +3,7 @@ import { IDockviewPanelProps } from 'dockview'
 import Editor, { DiffEditor, OnMount } from '@monaco-editor/react'
 import { electron } from '../../lib/electron'
 import { eventBus } from '../../lib/eventBus'
+import { useHotkeySettings } from '../../store/useHotkeySettings'
 import FileIcon from '../FileIcon'
 
 interface EditorPanelParams {
@@ -495,15 +496,14 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey) {
-        if (e.key === 's') {
-          e.preventDefault()
-          saveFile()
-        } else if (e.key === 'w') {
-          e.preventDefault()
-          if (activeFilePath) {
-            closeFile(activeFilePath)
-          }
+      const hotkeys = useHotkeySettings.getState()
+      if (hotkeys.matchesEvent('save-file', e)) {
+        e.preventDefault()
+        saveFile()
+      } else if (hotkeys.matchesEvent('close-tab', e)) {
+        e.preventDefault()
+        if (activeFilePath) {
+          closeFile(activeFilePath)
         }
       }
     }

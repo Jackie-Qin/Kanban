@@ -10,6 +10,7 @@ import UpdateNotification from './components/UpdateNotification'
 import { Task } from './types'
 import { electron } from './lib/electron'
 import { useTerminalSettings } from './store/useTerminalSettings'
+import { useHotkeySettings } from './store/useHotkeySettings'
 import { eventBus } from './lib/eventBus'
 import { prefetchGitData, prefetchDirData } from './lib/projectCache'
 
@@ -27,11 +28,13 @@ export default function App() {
   const [preInitDone, setPreInitDone] = useState(false)
   const splashStartRef = useRef(Date.now())
   const { zoomIn, zoomOut, resetZoom, loadSettings: loadTerminalSettings } = useTerminalSettings()
+  const { loadSettings: loadHotkeySettings } = useHotkeySettings()
 
   useEffect(() => {
     loadData()
     loadTerminalSettings()
-  }, [loadData, loadTerminalSettings])
+    loadHotkeySettings()
+  }, [loadData, loadTerminalSettings, loadHotkeySettings])
 
   // Pre-initialize all open projects after data loads
   useEffect(() => {
@@ -74,19 +77,24 @@ export default function App() {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd+P: File search
-      if (e.metaKey && e.key === 'p' && !e.shiftKey) {
+      const hotkeys = useHotkeySettings.getState()
+
+      if (hotkeys.matchesEvent('file-search', e)) {
         e.preventDefault()
         setSearchMode('files')
+        return
       }
-      // Cmd+Shift+F: Text search
-      if (e.metaKey && e.shiftKey && e.key === 'f') {
+      if (hotkeys.matchesEvent('text-search', e)) {
         e.preventDefault()
         setSearchMode('text')
+        return
       }
-
-      // Cmd+Left / Cmd+Right: Switch projects
-      if (e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      if (hotkeys.matchesEvent('new-terminal', e)) {
+        e.preventDefault()
+        eventBus.emit('terminal:add', {} as Record<string, never>)
+        return
+      }
+      if (hotkeys.matchesEvent('switch-project-left', e) || hotkeys.matchesEvent('switch-project-right', e)) {
         const { projects: allProjects, activeProjectId: currentId, closedProjectIds: closedIds, setActiveProject: switchTo } = useStore.getState()
         const openProjects = allProjects.filter(p => !closedIds.includes(p.id))
         if (openProjects.length < 2) return
@@ -95,7 +103,7 @@ export default function App() {
         if (currentIndex === -1) return
 
         e.preventDefault()
-        if (e.key === 'ArrowLeft') {
+        if (hotkeys.matchesEvent('switch-project-left', e)) {
           const prevIndex = (currentIndex - 1 + openProjects.length) % openProjects.length
           switchTo(openProjects[prevIndex].id)
         } else {

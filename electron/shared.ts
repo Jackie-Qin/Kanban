@@ -64,6 +64,7 @@ export interface AppSettings {
   terminalFontFamily?: string
   appZoomFactor?: number
   terminalStates?: Record<string, TerminalStateEntry>
+  hotkeyOverrides?: Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>
 }
 
 // Settings helpers
