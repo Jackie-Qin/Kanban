@@ -17,6 +17,7 @@ interface TerminalProps {
   projectPath: string
   terminalName: string
   isActive: boolean
+  isVisible: boolean
   onSelect: () => void
 }
 
@@ -25,6 +26,7 @@ export default function Terminal({
   projectPath,
   terminalName,
   isActive,
+  isVisible,
   onSelect
 }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null)
@@ -96,8 +98,6 @@ export default function Terminal({
       fontFamily: `"${state.fontFamily}", Monaco, Menlo, monospace`,
       fontWeight: '500',
       fontWeightBold: '700',
-      lineHeight: 1.0,
-      letterSpacing: 0,
       theme: initTheme.theme
     })
 
@@ -340,18 +340,19 @@ export default function Terminal({
       }
     }, 100)
 
-    // Handle resize — debounce to avoid flooding IPC with ptyResize calls
-    // during window resize/fullscreen transitions (all terminals fire at once)
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null
+    // Handle resize — use rAF to fit on the next frame after layout settles.
+    // xterm.resize() is a no-op when cols/rows haven't changed, so per-frame
+    // calls during a drag are cheap and keep the terminal in sync with its container.
+    let rafId: number | null = null
     const resizeObserver = new ResizeObserver(() => {
-      if (resizeTimer) clearTimeout(resizeTimer)
-      resizeTimer = setTimeout(fitTerminal, 150)
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(fitTerminal)
     })
     resizeObserver.observe(container)
 
     return () => {
       clearTimeout(initTimeout)
-      if (resizeTimer) clearTimeout(resizeTimer)
+      if (rafId) cancelAnimationFrame(rafId)
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
       resizeObserver.disconnect()
       unsubscribeData()
@@ -402,19 +403,24 @@ export default function Terminal({
     requestAnimationFrame(fitTerminal)
   }, [themeName, fontSize, fontFamily, fitTerminal])
 
-  // Focus when active — fitTerminal handles fit + deferred scroll to bottom
-  // Also clear WebGL texture atlas to fix garbled rendering after visibility changes
+  // Clear WebGL texture atlas and refit when terminal becomes visible.
+  // In split view, all terminals are visible but only one is "active" (focused).
+  // Without this, non-active terminals show garbled WebGL rendering.
   useEffect(() => {
-    if (isActive && xtermRef.current) {
-      xtermRef.current.focus()
+    if (isVisible && xtermRef.current) {
       if (webglAddonRef.current) {
         try { webglAddonRef.current.clearTextureAtlas() } catch { /* ignore */ }
       }
-      requestAnimationFrame(() => {
-        fitTerminal()
-      })
+      fitTerminal()
     }
-  }, [isActive, fitTerminal])
+  }, [isVisible, fitTerminal])
+
+  // Focus when active (separate from visibility to avoid focusing all split-view terminals)
+  useEffect(() => {
+    if (isActive && xtermRef.current) {
+      xtermRef.current.focus()
+    }
+  }, [isActive])
 
   const bgColor = getThemeByName(themeName).theme.background || '#14191e'
 
@@ -506,7 +512,7 @@ export default function Terminal({
           backgroundColor: bgColor
         }}
       >
-        <div ref={terminalRef} className="h-full w-full" />
+        <div ref={terminalRef} className="h-full w-full overflow-hidden" />
       </div>
       {/* Drop overlay */}
       {isDragOver && (

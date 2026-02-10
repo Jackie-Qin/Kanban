@@ -52,7 +52,7 @@ export function createPty(
   delete cleanEnv.npm_config_prefix
 
   try {
-    const ptyProcess = pty.spawn(shell, [], {
+    const ptyProcess = pty.spawn(shell, ['-l'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,

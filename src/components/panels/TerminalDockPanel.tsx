@@ -3,6 +3,7 @@ import { IDockviewPanelProps } from 'dockview'
 import Terminal from '../Terminal'
 import { electron } from '../../lib/electron'
 import { eventBus } from '../../lib/eventBus'
+import { useStore } from '../../store/useStore'
 import { useHotkeySettings } from '../../store/useHotkeySettings'
 import { formatBinding } from '../../lib/hotkeys'
 
@@ -37,18 +38,22 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
     const [projectStates, setProjectStates] = useState<Record<string, ProjectTerminalState>>({})
     const terminalsRef = useRef<TerminalInfo[]>([])
     const persistedStatesRef = useRef<Record<string, { terminals: { id: string; name: string }[]; activeTerminalId: string; isSplitView: boolean }> | null>(null)
-    const initializedRef = useRef(false)
+    const [initialized, setInitialized] = useState(false)
     const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const prewarmTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
     // Load persisted terminal states once on mount
     useEffect(() => {
       electron.getTerminalStates().then(states => {
         persistedStatesRef.current = states
-        initializedRef.current = true
+        setInitialized(true)
       }).catch(() => {
         persistedStatesRef.current = {}
-        initializedRef.current = true
+        setInitialized(true)
       })
+      return () => {
+        prewarmTimersRef.current.forEach(clearTimeout)
+      }
     }, [])
 
     // Initialize or update state for current project
@@ -92,9 +97,47 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
       })
     }, [projectId, projectPath])
 
+    // Prewarm: stagger-init terminals for other projects during idle time
+    // so tab switches don't freeze. PTYs are already prewarmed on the Electron side.
+    useEffect(() => {
+      if (!initialized || !persistedStatesRef.current) return
+      const persisted = persistedStatesRef.current
+      const projects = useStore.getState().projects
+      const closedIds = new Set(useStore.getState().closedProjectIds)
+      const pathMap = new Map(projects.map(p => [p.id, p.path]))
+
+      let delay = 1500 // start after 1.5s to let the active terminal settle
+      prewarmTimersRef.current.forEach(clearTimeout)
+      prewarmTimersRef.current = []
+
+      for (const [pid, state] of Object.entries(persisted)) {
+        if (pid === projectId) continue // active project already initialized
+        if (closedIds.has(pid)) continue // skip closed projects
+        const path = pathMap.get(pid)
+        if (!path) continue
+
+        const timer = setTimeout(() => {
+          setProjectStates(prev => {
+            if (prev[pid]) return prev // already initialized
+            return {
+              ...prev,
+              [pid]: {
+                terminals: state.terminals,
+                activeTerminalId: state.activeTerminalId,
+                isSplitView: state.isSplitView,
+                projectPath: path
+              }
+            }
+          })
+        }, delay)
+        prewarmTimersRef.current.push(timer)
+        delay += 800 // stagger each project by 800ms
+      }
+    }, [initialized, projectId]) // runs after persisted states load + on project switch
+
     // Debounced save of terminal states to disk
     useEffect(() => {
-      if (!initializedRef.current) return
+      if (!initialized) return
 
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current)
@@ -157,10 +200,19 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
     const addTerminal = useCallback(() => {
       if (terminals.length >= MAX_TERMINALS) return
 
-      const newIndex = terminals.length + 1
+      // Find the lowest unused terminal number to avoid duplicates
+      const usedNumbers = new Set(
+        terminals.map(t => {
+          const match = t.name.match(/^Terminal (\d+)$/)
+          return match ? parseInt(match[1], 10) : 0
+        })
+      )
+      let nextNumber = 1
+      while (usedNumbers.has(nextNumber)) nextNumber++
+
       const newTerminal: TerminalInfo = {
         id: `${projectId}-term-${Date.now()}`,
-        name: `Terminal ${newIndex}`
+        name: `Terminal ${nextNumber}`
       }
       updateCurrentProjectState(() => ({
         terminals: [...terminals, newTerminal],
@@ -182,10 +234,12 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
           }))
           return
         }
+        // Renumber remaining terminals sequentially
+        const renumbered = newTerminals.map((t, i) => ({ ...t, name: `Terminal ${i + 1}` }))
         // If closing active terminal, switch to another
-        const newActiveId = terminalId === activeTerminalId ? newTerminals[0].id : activeTerminalId
+        const newActiveId = terminalId === activeTerminalId ? renumbered[0].id : activeTerminalId
         updateCurrentProjectState(() => ({
-          terminals: newTerminals,
+          terminals: renumbered,
           activeTerminalId: newActiveId
         }))
       },
@@ -364,6 +418,7 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
                         projectPath={state.projectPath}
                         terminalName={terminal.name}
                         isActive={isCurrentProject && state.activeTerminalId === terminal.id}
+                        isVisible={isCurrentProject}
                         onSelect={() => setActiveTerminalId(terminal.id)}
                       />
                     </div>
@@ -386,6 +441,7 @@ const TerminalDockPanel = forwardRef<TerminalDockPanelRef, IDockviewPanelProps<T
                           projectPath={state.projectPath}
                           terminalName={terminal.name}
                           isActive={isCurrentProject && isActiveTerminal}
+                          isVisible={isCurrentProject && isActiveTerminal}
                           onSelect={() => setActiveTerminalId(terminal.id)}
                         />
                       </div>

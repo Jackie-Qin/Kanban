@@ -10,7 +10,7 @@ import { registerFsHandlers } from './handlers/fs'
 import { registerTerminalStateHandlers } from './handlers/terminal-state'
 import { registerAttachmentHandlers } from './handlers/attachments'
 import { registerSearchHandlers } from './handlers/search'
-import { initDatabase, closeDatabase } from './database'
+import { initDatabase, closeDatabase, getAllProjects } from './database'
 
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
@@ -117,6 +117,22 @@ app.whenReady().then(async () => {
 
   if (settings.autoSync) {
     startFileWatcher()
+  }
+
+  // Prewarm PTY processes for all persisted terminals so tab switches are instant
+  const terminalStates = settings.terminalStates || {}
+  const projects = getAllProjects() as { id: string; path: string }[]
+  const pathMap = new Map(projects.map(p => [p.id, p.path]))
+  let prewarmDelay = 500
+  for (const [projectId, state] of Object.entries(terminalStates)) {
+    const projPath = pathMap.get(projectId)
+    if (!projPath) continue
+    for (const terminal of state.terminals) {
+      if (!hasPty(terminal.id)) {
+        setTimeout(() => createPty(terminal.id, projPath), prewarmDelay)
+        prewarmDelay += 200
+      }
+    }
   }
 
   // Check for updates on startup (production only)
