@@ -123,8 +123,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs-rename', oldPath, newPath),
   fsDelete: (targetPath: string): Promise<boolean> =>
     ipcRenderer.invoke('fs-delete', targetPath),
+  fsMove: (sourcePath: string, destDir: string): Promise<boolean> =>
+    ipcRenderer.invoke('fs-move', sourcePath, destDir),
   fsExists: (targetPath: string): Promise<boolean> =>
     ipcRenderer.invoke('fs-exists', targetPath),
+  fsShowInFolder: (targetPath: string): Promise<void> =>
+    ipcRenderer.invoke('fs-show-in-folder', targetPath),
 
   // Git methods
   gitStatus: (projectPath: string): Promise<GitStatus> =>
@@ -238,6 +242,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveHotkeySettings: (overrides: Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>): Promise<boolean> =>
     ipcRenderer.invoke('save-hotkey-settings', overrides),
 
+  // Notification Settings methods
+  getNotificationSettings: (): Promise<{ soundEnabled: boolean; sound: string }> =>
+    ipcRenderer.invoke('get-notification-settings'),
+  saveNotificationSettings: (settings: { soundEnabled?: boolean; sound?: string }): Promise<boolean> =>
+    ipcRenderer.invoke('save-notification-settings', settings),
+
   // App Zoom methods
   getAppZoom: (): Promise<number> => ipcRenderer.invoke('get-app-zoom'),
   setAppZoom: (factor: number): Promise<boolean> => ipcRenderer.invoke('set-app-zoom', factor),
@@ -273,5 +283,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadTerminalBuffer: (terminalId: string): Promise<string | null> =>
     ipcRenderer.invoke('load-terminal-buffer', terminalId),
   deleteTerminalBuffers: (projectId: string): Promise<boolean> =>
-    ipcRenderer.invoke('delete-terminal-buffers', projectId)
+    ipcRenderer.invoke('delete-terminal-buffers', projectId),
+
+  // System notification
+  showSystemNotification: (options: { title: string; body: string }) =>
+    ipcRenderer.invoke('show-system-notification', options),
 })

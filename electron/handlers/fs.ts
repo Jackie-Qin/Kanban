@@ -2,7 +2,7 @@ import { ipcMain, dialog, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
-import { getMainWindow, IMAGE_MIME_MAP } from '../shared'
+import { getMainWindow, IMAGE_MIME_MAP, FILE_MIME_MAP } from '../shared'
 import { openInITerm } from '../iterm'
 
 interface FileEntry {
@@ -122,15 +122,33 @@ export function registerFsHandlers() {
     }
   })
 
+  ipcMain.handle('fs-move', async (_event, sourcePath: string, destDir: string): Promise<boolean> => {
+    try {
+      const name = path.basename(sourcePath)
+      const newPath = path.join(destDir, name)
+      if (sourcePath === newPath) return true
+      if (fs.existsSync(newPath)) return false // don't overwrite
+      fs.renameSync(sourcePath, newPath)
+      return true
+    } catch (error) {
+      console.error('Failed to move:', error)
+      return false
+    }
+  })
+
   ipcMain.handle('fs-exists', async (_event, targetPath: string): Promise<boolean> => {
     return fs.existsSync(targetPath)
+  })
+
+  ipcMain.handle('fs-show-in-folder', (_event, targetPath: string) => {
+    shell.showItemInFolder(targetPath)
   })
 
   ipcMain.handle('fs-read-file-base64', (_event, filePath: string): string | null => {
     try {
       const buf = fs.readFileSync(filePath)
       const ext = path.extname(filePath).toLowerCase()
-      const mime = IMAGE_MIME_MAP[ext] || 'application/octet-stream'
+      const mime = FILE_MIME_MAP[ext] || IMAGE_MIME_MAP[ext] || 'application/octet-stream'
       return `data:${mime};base64,${buf.toString('base64')}`
     } catch {
       return null

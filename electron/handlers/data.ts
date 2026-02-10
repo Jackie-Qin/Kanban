@@ -1,4 +1,4 @@
-import { ipcMain, Menu } from 'electron'
+import { ipcMain, Menu, Notification } from 'electron'
 import fs from 'fs'
 import {
   DATA_FILE,
@@ -216,6 +216,23 @@ export function registerDataHandlers() {
     return true
   })
 
+  // Notification Settings
+  ipcMain.handle('get-notification-settings', async () => {
+    const settings = await loadSettings()
+    return {
+      soundEnabled: settings.notificationSoundEnabled ?? true,
+      sound: settings.notificationSound ?? 'chime'
+    }
+  })
+
+  ipcMain.handle('save-notification-settings', async (_event, partial: { soundEnabled?: boolean; sound?: string }) => {
+    const settings = await loadSettings()
+    if (partial.soundEnabled !== undefined) settings.notificationSoundEnabled = partial.soundEnabled
+    if (partial.sound !== undefined) settings.notificationSound = partial.sound
+    saveSettings(settings)
+    return true
+  })
+
   // App Zoom
   ipcMain.handle('get-app-zoom', () => {
     return getMainWindow()?.webContents.getZoomFactor() ?? 1
@@ -228,6 +245,27 @@ export function registerDataHandlers() {
       const settings = await loadSettings()
       settings.appZoomFactor = factor
       saveSettings(settings)
+    }
+    return true
+  })
+
+  // System notification
+  ipcMain.handle('show-system-notification', (_event, options: { title: string; body: string }) => {
+    if (Notification.isSupported()) {
+      const notif = new Notification({
+        title: options.title,
+        body: options.body,
+        silent: true,  // We handle our own sound
+      })
+      notif.show()
+      // When user clicks the notification, focus the app window
+      notif.on('click', () => {
+        const win = getMainWindow()
+        if (win) {
+          if (win.isMinimized()) win.restore()
+          win.focus()
+        }
+      })
     }
     return true
   })

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import { electron, FileEntry } from '../../lib/electron'
 import { dirCache } from '../../lib/projectCache'
@@ -22,11 +22,20 @@ interface FileTreeItemProps {
   depth: number
   showHidden: boolean
   selectedPaths: Set<string>
+  dragOverPath: string | null
+  renamingPath: string | null
+  renameValue: string
   onToggle: (path: string) => void
   onSelect: (path: string, isDirectory: boolean) => void
   onDoubleClick: (path: string, isDirectory: boolean) => void
   onMultiSelect: (path: string) => void
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void
+  onDragOverDir: (path: string) => void
+  onDragLeaveDir: () => void
+  onDropOnDir: (targetDir: string, sourcePath: string) => void
+  onRenameChange: (value: string) => void
+  onRenameSubmit: () => void
+  onRenameCancel: () => void
 }
 
 function FileTreeItem({
@@ -34,13 +43,25 @@ function FileTreeItem({
   depth,
   showHidden,
   selectedPaths,
+  dragOverPath,
+  renamingPath,
+  renameValue,
   onToggle,
   onSelect,
   onDoubleClick,
   onMultiSelect,
-  onContextMenu
+  onContextMenu,
+  onDragOverDir,
+  onDragLeaveDir,
+  onDropOnDir,
+  onRenameChange,
+  onRenameSubmit,
+  onRenameCancel
 }: FileTreeItemProps) {
   if (node.isHidden && !showHidden) return null
+
+  const isRenaming = renamingPath === node.path
+  const isDragOver = dragOverPath === node.path && node.isDirectory
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -60,19 +81,46 @@ function FileTreeItem({
     onDoubleClick(node.path, node.isDirectory)
   }
 
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!node.isDirectory) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    onDragOverDir(node.path)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.stopPropagation()
+    onDragLeaveDir()
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onDragLeaveDir()
+    if (!node.isDirectory) return
+    const sourcePath = e.dataTransfer.getData('application/x-kanban-file')
+    if (sourcePath && sourcePath !== node.path) {
+      onDropOnDir(node.path, sourcePath)
+    }
+  }
+
   const isSelected = selectedPaths.has(node.path)
 
   return (
     <div>
       <div
-        className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-dark-hover rounded text-sm group ${isSelected ? 'bg-blue-500/20' : ''}`}
+        className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-dark-hover rounded text-sm group ${isSelected ? 'bg-blue-500/20' : ''} ${isDragOver ? 'bg-blue-500/30 outline outline-1 outline-blue-500' : ''}`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        draggable="true"
+        draggable={!isRenaming}
         onDragStart={(e) => {
           e.dataTransfer.setData('application/x-kanban-file', node.path)
           e.dataTransfer.setData('text/plain', node.path)
-          e.dataTransfer.effectAllowed = 'copy'
+          e.dataTransfer.effectAllowed = 'move'
         }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onContextMenu={(e) => onContextMenu(e, node)}
@@ -101,11 +149,27 @@ function FileTreeItem({
             <FileIcon name={node.name} isDirectory={false} className="w-4 h-4 flex-shrink-0" />
           </>
         )}
-        <span
-          className={`truncate ${node.isHidden ? 'text-dark-muted' : 'text-dark-text'}`}
-        >
-          {node.name}
-        </span>
+        {isRenaming ? (
+          <input
+            type="text"
+            value={renameValue}
+            onChange={(e) => onRenameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onRenameSubmit()
+              if (e.key === 'Escape') onRenameCancel()
+            }}
+            onBlur={onRenameCancel}
+            className="flex-1 bg-dark-bg border border-blue-500 rounded px-1 py-0 text-sm text-dark-text focus:outline-none min-w-0"
+            autoFocus
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span
+            className={`truncate ${node.isHidden ? 'text-dark-muted' : 'text-dark-text'}`}
+          >
+            {node.name}
+          </span>
+        )}
       </div>
       {node.isDirectory && node.isExpanded && node.children && (
         <div>
@@ -116,11 +180,20 @@ function FileTreeItem({
               depth={depth + 1}
               showHidden={showHidden}
               selectedPaths={selectedPaths}
+              dragOverPath={dragOverPath}
+              renamingPath={renamingPath}
+              renameValue={renameValue}
               onToggle={onToggle}
               onSelect={onSelect}
               onDoubleClick={onDoubleClick}
               onMultiSelect={onMultiSelect}
               onContextMenu={onContextMenu}
+              onDragOverDir={onDragOverDir}
+              onDragLeaveDir={onDragLeaveDir}
+              onDropOnDir={onDropOnDir}
+              onRenameChange={onRenameChange}
+              onRenameSubmit={onRenameSubmit}
+              onRenameCancel={onRenameCancel}
             />
           ))}
         </div>
@@ -143,6 +216,10 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
   const [newItemName, setNewItemName] = useState('')
   const [createPath, setCreatePath] = useState('')
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null)
+  const [renamingPath, setRenamingPath] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const dragLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Load initial directory — restore cache instantly, then refresh in background
   useEffect(() => {
@@ -302,7 +379,6 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
     if (confirmed) {
       const success = await electron.fsDelete(contextMenu.node.path)
       if (success) {
-        // Refresh parent directory
         loadDirectory(projectPath)
       }
     }
@@ -314,6 +390,39 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
     navigator.clipboard.writeText(contextMenu.node.path)
     setContextMenu(null)
   }, [contextMenu])
+
+  const handleRevealInFinder = useCallback(() => {
+    if (!contextMenu?.node) return
+    electron.fsShowInFolder(contextMenu.node.path)
+    setContextMenu(null)
+  }, [contextMenu])
+
+  const handleRenameStart = useCallback(() => {
+    if (!contextMenu?.node) return
+    setRenamingPath(contextMenu.node.path)
+    setRenameValue(contextMenu.node.name)
+    setContextMenu(null)
+  }, [contextMenu])
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renamingPath || !renameValue.trim()) {
+      setRenamingPath(null)
+      return
+    }
+    const parentDir = renamingPath.substring(0, renamingPath.lastIndexOf('/'))
+    const newPath = `${parentDir}/${renameValue.trim()}`
+    if (newPath !== renamingPath) {
+      const success = await electron.fsRename(renamingPath, newPath)
+      if (success) {
+        loadDirectory(projectPath)
+      }
+    }
+    setRenamingPath(null)
+  }, [renamingPath, renameValue, projectPath])
+
+  const handleRenameCancel = useCallback(() => {
+    setRenamingPath(null)
+  }, [])
 
   const handleMultiSelect = useCallback((path: string) => {
     setSelectedPaths(prev => {
@@ -359,6 +468,62 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
 
   const handleRefresh = useCallback(() => {
     if (projectPath) {
+      loadDirectory(projectPath)
+    }
+  }, [projectPath])
+
+  const handleCollapseAll = useCallback(() => {
+    const collapseNodes = (nodes: TreeNode[]): TreeNode[] =>
+      nodes.map((node) => ({
+        ...node,
+        isExpanded: false,
+        children: node.children ? collapseNodes(node.children) : undefined
+      }))
+    setTree((prev) => collapseNodes(prev))
+  }, [])
+
+  // Drag-and-drop: move file/folder into target directory
+  const handleDragOverDir = useCallback((path: string) => {
+    if (dragLeaveTimer.current) {
+      clearTimeout(dragLeaveTimer.current)
+      dragLeaveTimer.current = null
+    }
+    setDragOverPath(path)
+  }, [])
+
+  const handleDragLeaveDir = useCallback(() => {
+    // Small delay to prevent flicker when moving between parent/child elements
+    dragLeaveTimer.current = setTimeout(() => setDragOverPath(null), 50)
+  }, [])
+
+  const handleDropOnDir = useCallback(async (targetDir: string, sourcePath: string) => {
+    setDragOverPath(null)
+    // Don't drop onto own parent (no-op) or onto self
+    const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf('/'))
+    if (targetDir === sourceParent) return
+    // Don't drop a directory into its own subtree
+    if (targetDir.startsWith(sourcePath + '/')) return
+
+    const success = await electron.fsMove(sourcePath, targetDir)
+    if (success) {
+      loadDirectory(projectPath)
+    }
+  }, [projectPath])
+
+  // Allow dropping on the root tree area (move to project root)
+  const handleRootDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const handleRootDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    const sourcePath = e.dataTransfer.getData('application/x-kanban-file')
+    if (!sourcePath || !projectPath) return
+    const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf('/'))
+    if (sourceParent === projectPath) return
+    const success = await electron.fsMove(sourcePath, projectPath)
+    if (success) {
       loadDirectory(projectPath)
     }
   }, [projectPath])
@@ -410,6 +575,15 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
             </button>
           )}
         </div>
+        <button
+          onClick={handleCollapseAll}
+          className="p-1.5 rounded text-dark-muted hover:text-dark-text hover:bg-dark-hover transition-colors"
+          title="Collapse All"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+          </svg>
+        </button>
         <button
           onClick={() => setShowHidden(!showHidden)}
           className={`p-1.5 rounded text-sm transition-colors ${
@@ -510,7 +684,11 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
       )}
 
       {/* File tree */}
-      <div className="flex-1 overflow-auto py-2">
+      <div
+        className="flex-1 overflow-auto py-2"
+        onDragOver={handleRootDragOver}
+        onDrop={handleRootDrop}
+      >
         {displayTree.length === 0 ? (
           <div className="text-center text-dark-muted py-8 text-sm">
             {searchQuery ? 'No files found' : 'No files'}
@@ -523,11 +701,20 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
               depth={0}
               showHidden={showHidden}
               selectedPaths={selectedPaths}
+              dragOverPath={dragOverPath}
+              renamingPath={renamingPath}
+              renameValue={renameValue}
               onToggle={handleToggle}
               onSelect={handleSelect}
               onDoubleClick={handleDoubleClick}
               onMultiSelect={handleMultiSelect}
               onContextMenu={handleContextMenu}
+              onDragOverDir={handleDragOverDir}
+              onDragLeaveDir={handleDragLeaveDir}
+              onDropOnDir={handleDropOnDir}
+              onRenameChange={setRenameValue}
+              onRenameSubmit={handleRenameSubmit}
+              onRenameCancel={handleRenameCancel}
             />
           ))
         )}
@@ -571,10 +758,22 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
           ) : (
             <>
               <button
+                onClick={handleRenameStart}
+                className="w-full px-4 py-2 text-left text-sm hover:bg-dark-hover"
+              >
+                Rename
+              </button>
+              <button
                 onClick={handleCopyPath}
                 className="w-full px-4 py-2 text-left text-sm hover:bg-dark-hover"
               >
                 Copy Path
+              </button>
+              <button
+                onClick={handleRevealInFinder}
+                className="w-full px-4 py-2 text-left text-sm hover:bg-dark-hover"
+              >
+                Reveal in Finder
               </button>
               <div className="h-px bg-dark-border my-1" />
               <button

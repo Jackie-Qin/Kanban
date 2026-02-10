@@ -102,7 +102,9 @@ declare global {
       fsCreateDirectory: (dirPath: string) => Promise<boolean>
       fsRename: (oldPath: string, newPath: string) => Promise<boolean>
       fsDelete: (targetPath: string) => Promise<boolean>
+      fsMove: (sourcePath: string, destDir: string) => Promise<boolean>
       fsExists: (targetPath: string) => Promise<boolean>
+      fsShowInFolder: (targetPath: string) => Promise<void>
       // Git methods
       gitStatus: (projectPath: string) => Promise<GitStatus>
       gitChangedFiles: (projectPath: string) => Promise<GitChangedFile[]>
@@ -155,6 +157,9 @@ declare global {
       // Hotkey Settings methods
       getHotkeySettings: () => Promise<Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>>
       saveHotkeySettings: (overrides: Record<string, { key: string; meta?: boolean; shift?: boolean; alt?: boolean; ctrl?: boolean }>) => Promise<boolean>
+      // Notification Settings methods
+      getNotificationSettings: () => Promise<{ soundEnabled: boolean; sound: string }>
+      saveNotificationSettings: (settings: { soundEnabled?: boolean; sound?: string }) => Promise<boolean>
       // App Zoom methods
       getAppZoom: () => Promise<number>
       setAppZoom: (factor: number) => Promise<boolean>
@@ -172,6 +177,8 @@ declare global {
       saveTerminalBuffer: (terminalId: string, content: string) => Promise<boolean>
       loadTerminalBuffer: (terminalId: string) => Promise<string | null>
       deleteTerminalBuffers: (projectId: string) => Promise<boolean>
+      // System notification
+      showSystemNotification: (options: { title: string; body: string }) => Promise<boolean>
     }
   }
 }

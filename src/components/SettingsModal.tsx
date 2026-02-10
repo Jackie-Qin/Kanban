@@ -3,8 +3,10 @@ import { useStore } from '../store/useStore'
 import { electron } from '../lib/electron'
 import { useTerminalSettings } from '../store/useTerminalSettings'
 import { useHotkeySettings } from '../store/useHotkeySettings'
+import { useNotificationSettings } from '../store/useNotificationSettings'
 import { terminalThemes, FONT_FAMILIES, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../lib/terminalThemes'
 import { HOTKEY_ACTIONS, formatBinding, bindingsEqual, getDefaultBinding, KeyBinding } from '../lib/hotkeys'
+import { NOTIFICATION_SOUNDS, playNotificationSound } from '../lib/notificationSounds'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -26,6 +28,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { labels, addLabel, updateLabel, deleteLabel } = useStore()
   const { themeName, fontSize, fontFamily, setTheme, setFontSize, setFontFamily } = useTerminalSettings()
   const { getBinding, setBinding, resetBinding } = useHotkeySettings()
+  const { soundEnabled, sound: selectedSound, setSoundEnabled, setSound } = useNotificationSettings()
   const [newLabelName, setNewLabelName] = useState('')
   const [newLabelColor, setNewLabelColor] = useState(PRESET_COLORS[0])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -191,6 +194,62 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                 </button>
               )}
             </div>
+          </div>
+
+          <div className="border-t border-dark-border" />
+
+          {/* Notifications section */}
+          <h3 className="text-sm font-medium text-dark-muted">Notifications</h3>
+
+          <div className="space-y-2">
+            {/* Sound toggle */}
+            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
+              <span className="text-sm">Notification Sound</span>
+              <button
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${
+                  soundEnabled ? 'bg-blue-600' : 'bg-dark-border'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                    soundEnabled ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Sound picker */}
+            {soundEnabled && (
+              <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
+                <span className="text-sm">Sound</span>
+                <div className="flex items-center gap-1.5">
+                  {NOTIFICATION_SOUNDS.map((s) => (
+                    <div key={s.id} className="flex items-center gap-0.5">
+                      <button
+                        onClick={() => setSound(s.id)}
+                        className={`px-2 py-1 rounded text-xs transition-colors ${
+                          s.id === selectedSound
+                            ? 'bg-dark-hover text-dark-text ring-1 ring-dark-border'
+                            : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                      <button
+                        onClick={() => playNotificationSound(s.id)}
+                        className="p-0.5 text-dark-muted hover:text-dark-text rounded transition-colors"
+                        title={`Preview ${s.label}`}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-dark-border" />

@@ -1,9 +1,8 @@
 import { useCallback } from 'react'
-import { DockviewApi } from 'dockview'
 
 interface ActivityBarProps {
-  apiRef: React.RefObject<DockviewApi | null>
   openPanelIds: string[]
+  activePanelId: string | null
   onTogglePanel: (panelId: string) => void
   onResetLayout: () => void
 }
@@ -57,8 +56,8 @@ const TOP_PANELS = ['directory', 'git', 'kanban', 'editor']
 const BOTTOM_PANELS = ['terminal']
 
 export default function ActivityBar({
-  apiRef,
   openPanelIds,
+  activePanelId,
   onTogglePanel,
   onResetLayout
 }: ActivityBarProps) {
@@ -69,18 +68,9 @@ export default function ActivityBar({
     [onTogglePanel]
   )
 
-  const isActive = useCallback(
-    (panelId: string) => {
-      if (!apiRef.current) return false
-      const panel = apiRef.current.getPanel(panelId)
-      return panel?.api.isActive ?? false
-    },
-    [apiRef]
-  )
-
   const renderIcon = (panelId: string) => {
     const isOpen = openPanelIds.includes(panelId)
-    const active = isOpen && isActive(panelId)
+    const active = isOpen && activePanelId === panelId
 
     return (
       <button

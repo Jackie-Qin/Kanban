@@ -12,6 +12,7 @@ import { Task } from './types'
 import { electron } from './lib/electron'
 import { useTerminalSettings } from './store/useTerminalSettings'
 import { useHotkeySettings } from './store/useHotkeySettings'
+import { useNotificationSettings } from './store/useNotificationSettings'
 import { eventBus } from './lib/eventBus'
 import { prefetchGitData, prefetchDirData } from './lib/projectCache'
 
@@ -30,12 +31,14 @@ export default function App() {
   const splashStartRef = useRef(Date.now())
   const { zoomIn, zoomOut, resetZoom, loadSettings: loadTerminalSettings } = useTerminalSettings()
   const { loadSettings: loadHotkeySettings } = useHotkeySettings()
+  const { loadSettings: loadNotificationSettings } = useNotificationSettings()
 
   useEffect(() => {
     loadData()
     loadTerminalSettings()
     loadHotkeySettings()
-  }, [loadData, loadTerminalSettings, loadHotkeySettings])
+    loadNotificationSettings()
+  }, [loadData, loadTerminalSettings, loadHotkeySettings, loadNotificationSettings])
 
   // Pre-initialize all open projects after data loads
   useEffect(() => {

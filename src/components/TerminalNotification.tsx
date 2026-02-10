@@ -1,5 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { eventBus } from '../lib/eventBus'
+import { electron } from '../lib/electron'
+import { playNotificationSound } from '../lib/notificationSounds'
+import { useNotificationSettings } from '../store/useNotificationSettings'
 
 interface Notification {
   id: number
@@ -10,40 +13,6 @@ interface Notification {
 
 const DISPLAY_MS = 4000
 const FADE_MS = 300
-
-function playChime() {
-  try {
-    const ctx = new AudioContext()
-
-    // Note 1: D5
-    const osc1 = ctx.createOscillator()
-    const gain1 = ctx.createGain()
-    osc1.type = 'sine'
-    osc1.frequency.value = 587.33
-    osc1.connect(gain1)
-    gain1.connect(ctx.destination)
-    gain1.gain.setValueAtTime(0.12, ctx.currentTime)
-    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
-    osc1.start(ctx.currentTime)
-    osc1.stop(ctx.currentTime + 0.35)
-
-    // Note 2: A5 (slightly delayed)
-    const osc2 = ctx.createOscillator()
-    const gain2 = ctx.createGain()
-    osc2.type = 'sine'
-    osc2.frequency.value = 880
-    osc2.connect(gain2)
-    gain2.connect(ctx.destination)
-    gain2.gain.setValueAtTime(0.12, ctx.currentTime + 0.12)
-    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
-    osc2.start(ctx.currentTime + 0.12)
-    osc2.stop(ctx.currentTime + 0.5)
-
-    setTimeout(() => ctx.close(), 1000)
-  } catch {
-    // Audio not available
-  }
-}
 
 export default function TerminalNotification() {
   const [notifications, setNotifications] = useState<Notification[]>()
@@ -61,12 +30,21 @@ export default function TerminalNotification() {
 
   useEffect(() => {
     return eventBus.on('terminal:activity-done', ({ terminalName, projectName }) => {
-      playChime()
+      const { soundEnabled, sound } = useNotificationSettings.getState()
+      if (soundEnabled) {
+        playNotificationSound(sound)
+      }
       const id = Date.now()
       setNotifications(prev => [...(prev || []), { id, projectName, terminalName, fading: false }])
 
       const timer = setTimeout(() => dismiss(id), DISPLAY_MS)
       timersRef.current.set(id, timer)
+
+      // Send OS-level system notification
+      electron.showSystemNotification({
+        title: `${projectName} · ${terminalName} done`,
+        body: 'Terminal task completed'
+      })
     })
   }, [dismiss])
 

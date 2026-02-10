@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import Editor, { DiffEditor, OnMount } from '@monaco-editor/react'
+import { marked } from 'marked'
 import { electron } from '../../lib/electron'
 import { eventBus } from '../../lib/eventBus'
 import { useHotkeySettings } from '../../store/useHotkeySettings'
@@ -12,11 +13,24 @@ interface EditorPanelParams {
 }
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
+const MD_EXTENSIONS = new Set(['.md', '.markdown', '.mdx'])
 
 function isImageFile(filename: string): boolean {
   const ext = '.' + (filename.split('.').pop()?.toLowerCase() || '')
   return IMAGE_EXTENSIONS.has(ext)
 }
+
+function isPdfFile(filename: string): boolean {
+  return filename.toLowerCase().endsWith('.pdf')
+}
+
+function isMarkdownFile(filename: string): boolean {
+  const ext = '.' + (filename.split('.').pop()?.toLowerCase() || '')
+  return MD_EXTENSIONS.has(ext)
+}
+
+// Configure marked for GFM
+marked.setOptions({ gfm: true, breaks: true })
 
 interface OpenFile {
   path: string
@@ -27,6 +41,7 @@ interface OpenFile {
   isModified: boolean
   showDiff: boolean
   isImage?: boolean
+  isPdf?: boolean
   imageDataUrl?: string
   gitOriginal?: string // Content from git HEAD for diff view
 }
@@ -124,6 +139,7 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [diffViewMode, setDiffViewMode] = useState<'inline' | 'split'>('split')
+  const [mdPreview, setMdPreview] = useState(false)
   const [autoSave, setAutoSave] = useState(false)
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -185,6 +201,13 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
   }, [projectId])
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath)
+  const isActiveMd = activeFile ? isMarkdownFile(activeFile.name) : false
+
+  // Parse markdown content for preview
+  const mdHtml = useMemo(() => {
+    if (!isActiveMd || !mdPreview || !activeFile) return ''
+    return marked.parse(activeFile.content) as string
+  }, [isActiveMd, mdPreview, activeFile?.content])
 
   // Jump to a specific line in the editor
   const jumpToLine = useCallback((lineNumber: number) => {
@@ -241,6 +264,39 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
           isModified: false,
           showDiff: false,
           isImage: true,
+          imageDataUrl: dataUrl
+        }
+        setOpenFiles((prev) => {
+          if (isPreview) {
+            const previewIndex = prev.findIndex((f) => f.isPreview)
+            if (previewIndex !== -1) {
+              const newFiles = [...prev]
+              newFiles[previewIndex] = newFile
+              return newFiles
+            }
+          }
+          return [...prev, newFile]
+        })
+        setActiveFilePath(filePath)
+        return
+      }
+
+      // Handle PDF files
+      if (isPdfFile(name)) {
+        const dataUrl = await electron.fsReadFileBase64(filePath)
+        if (!dataUrl) {
+          console.error('Failed to read PDF:', filePath)
+          return
+        }
+        const newFile: OpenFile = {
+          path: filePath,
+          name,
+          content: '',
+          originalContent: '',
+          isPreview,
+          isModified: false,
+          showDiff: false,
+          isPdf: true,
           imageDataUrl: dataUrl
         }
         setOpenFiles((prev) => {
@@ -575,6 +631,42 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
               </div>
             </div>
           )}
+          {/* Markdown preview toggle */}
+          {isActiveMd && !activeFile?.showDiff && (
+            <div className="flex items-center px-2 border-r border-dark-border">
+              <div className="flex items-center bg-dark-bg rounded overflow-hidden">
+                <button
+                  onClick={() => setMdPreview(false)}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                    !mdPreview
+                      ? 'bg-dark-hover text-dark-text'
+                      : 'text-dark-muted hover:text-dark-text'
+                  }`}
+                  title="Edit markdown"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  <span>Edit</span>
+                </button>
+                <button
+                  onClick={() => setMdPreview(true)}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                    mdPreview
+                      ? 'bg-dark-hover text-dark-text'
+                      : 'text-dark-muted hover:text-dark-text'
+                  }`}
+                  title="Preview markdown"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  <span>Preview</span>
+                </button>
+              </div>
+            </div>
+          )}
           {openFiles.map((file) => (
             <div
               key={file.path}
@@ -649,6 +741,19 @@ export default function EditorPanel(props: IDockviewPanelProps<EditorPanelParams
                 alt={activeFile.name}
                 className="max-w-full max-h-full object-contain rounded"
                 style={{ imageRendering: 'auto' }}
+              />
+            </div>
+          ) : activeFile.isPdf && activeFile.imageDataUrl ? (
+            <embed
+              src={activeFile.imageDataUrl}
+              type="application/pdf"
+              className="w-full h-full"
+            />
+          ) : isActiveMd && mdPreview && !activeFile.showDiff ? (
+            <div className="h-full overflow-auto bg-[#1a1a1a]">
+              <div
+                className="md-preview max-w-3xl mx-auto px-8 py-6"
+                dangerouslySetInnerHTML={{ __html: mdHtml }}
               />
             </div>
           ) : activeFile.showDiff && activeFile.gitOriginal !== undefined ? (

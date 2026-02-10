@@ -79,6 +79,7 @@ export default function WorkspaceLayout({
   const isRestoringRef = useRef(false)
   const [isEmpty, setIsEmpty] = useState(false)
   const [openPanelIds, setOpenPanelIds] = useState<string[]>([])
+  const [activePanelId, setActivePanelId] = useState<string | null>(null)
 
   // Debounced resize: replaces dockview's per-frame ResizeObserver with a batched one
   useEffect(() => {
@@ -106,6 +107,7 @@ export default function WorkspaceLayout({
       const panels = apiRef.current.panels
       setIsEmpty(panels.length === 0)
       setOpenPanelIds(panels.map((p) => p.id))
+      setActivePanelId(apiRef.current.activePanel?.id ?? null)
     }
   }, [])
 
@@ -135,11 +137,26 @@ export default function WorkspaceLayout({
       const panel = PANEL_OPTIONS.find((p) => p.id === panelId)
       if (!panel) return
 
+      // When re-adding terminal, place it below the kanban/editor area
+      // (same position as default layout) instead of dockview's default (left)
+      const position =
+        panelId === 'terminal'
+          ? (() => {
+              const kanban = apiRef.current!.getPanel('kanban')
+              const editor = apiRef.current!.getPanel('editor')
+              const ref = kanban || editor
+              return ref
+                ? { referencePanel: ref.id, direction: 'below' as const }
+                : undefined
+            })()
+          : undefined
+
       apiRef.current.addPanel({
         id: panel.id,
         component: panel.component,
         title: panel.title,
-        params
+        params,
+        ...(position && { position, initialHeight: 220 })
       })
 
       updatePanelState()
@@ -315,6 +332,11 @@ export default function WorkspaceLayout({
       // Check initial state
       updatePanelState()
 
+      // Track active panel changes reactively
+      const activeDisposable = event.api.onDidActivePanelChange(() => {
+        setActivePanelId(event.api.activePanel?.id ?? null)
+      })
+
       // Save layout on structural changes only (panel add/remove/move).
       // Track panel count to distinguish structural changes from mere resize events.
       let lastPanelCount = event.api.panels.length
@@ -343,6 +365,7 @@ export default function WorkspaceLayout({
       })
 
       return () => {
+        activeDisposable.dispose()
         disposable.dispose()
         // Flush pending layout save on unmount so splitter positions aren't lost
         if (layoutSaveTimer) {
@@ -414,8 +437,8 @@ export default function WorkspaceLayout({
   return (
     <div className="h-full w-full flex">
       <ActivityBar
-        apiRef={apiRef}
         openPanelIds={openPanelIds}
+        activePanelId={activePanelId}
         onTogglePanel={handleTogglePanel}
         onResetLayout={handleResetLayout}
       />
