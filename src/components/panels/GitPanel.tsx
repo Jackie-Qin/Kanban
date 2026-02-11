@@ -256,10 +256,10 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
   }
 
   const handleDiscardAll = async () => {
-    const modifiedFiles = unstagedFiles.filter(f => f.status !== 'untracked').map(f => getFileNameFromPath(f.file))
-    if (modifiedFiles.length === 0) return
-    if (!confirm(`Discard all changes to ${modifiedFiles.length} file(s)?`)) return
-    const success = await electron.gitDiscard(projectPath, modifiedFiles)
+    const allFiles = unstagedFiles.map(f => getFileNameFromPath(f.file))
+    if (allFiles.length === 0) return
+    if (!confirm(`Discard all changes to ${allFiles.length} file(s)? Untracked files will be deleted.`)) return
+    const success = await electron.gitDiscard(projectPath, allFiles)
     if (!success) setGitError('Failed to discard changes')
     await fetchData()
   }
@@ -369,9 +369,9 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
   }
 
   const handleDiscardSelected = async () => {
-    const files = selectedUnstagedFiles.filter(f => f.status !== 'untracked').map(f => getFileNameFromPath(f.file))
+    const files = selectedUnstagedFiles.map(f => getFileNameFromPath(f.file))
     if (files.length === 0) return
-    if (!confirm(`Discard changes to ${files.length} file(s)?`)) return
+    if (!confirm(`Discard changes to ${files.length} file(s)? Untracked files will be deleted.`)) return
     await electron.gitDiscard(projectPath, files)
     await fetchData()
     setSelectedFiles(new Set())
@@ -668,15 +668,13 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
                   <div className="flex items-center gap-1">
                     {selectedUnstagedFiles.length > 0 ? (
                       <>
-                        {selectedUnstagedFiles.some(f => f.status !== 'untracked') && (
-                          <button
-                            onClick={handleDiscardSelected}
-                            className="text-xs px-2 py-0.5 text-orange-400 hover:text-orange-300 hover:bg-dark-border rounded transition-colors"
-                            title="Discard selected"
-                          >
-                            Revert
-                          </button>
-                        )}
+                        <button
+                          onClick={handleDiscardSelected}
+                          className="text-xs px-2 py-0.5 text-orange-400 hover:text-orange-300 hover:bg-dark-border rounded transition-colors"
+                          title="Discard selected"
+                        >
+                          Revert
+                        </button>
                         <button
                           onClick={handleStageSelected}
                           className="text-xs px-2 py-0.5 text-green-400 hover:text-green-300 hover:bg-dark-border rounded transition-colors"
@@ -687,15 +685,13 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
                       </>
                     ) : (
                       <>
-                        {unstagedFiles.some(f => f.status !== 'untracked') && (
-                          <button
-                            onClick={handleDiscardAll}
-                            className="text-xs px-2 py-0.5 text-dark-muted hover:text-orange-400 hover:bg-dark-border rounded transition-colors"
-                            title="Discard all changes"
-                          >
-                            Revert
-                          </button>
-                        )}
+                        <button
+                          onClick={handleDiscardAll}
+                          className="text-xs px-2 py-0.5 text-dark-muted hover:text-orange-400 hover:bg-dark-border rounded transition-colors"
+                          title="Discard all changes"
+                        >
+                          Revert
+                        </button>
                         <button
                           onClick={() => handleStage(unstagedFiles.map(f => getFileNameFromPath(f.file)))}
                           className="text-xs px-2 py-0.5 text-dark-muted hover:text-dark-text hover:bg-dark-border rounded transition-colors"
@@ -727,17 +723,15 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
                         {statusInfo.letter}
                       </span>
                       <div className="hidden group-hover:flex items-center gap-1 flex-shrink-0">
-                        {file.status !== 'untracked' && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDiscard(getFileNameFromPath(file.file)) }}
-                            className="p-1 text-dark-muted hover:text-orange-400"
-                            title="Discard changes"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                            </svg>
-                          </button>
-                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDiscard(getFileNameFromPath(file.file)) }}
+                          className="p-1 text-dark-muted hover:text-orange-400"
+                          title={file.status === 'untracked' ? 'Delete file' : 'Discard changes'}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                          </svg>
+                        </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleStage([getFileNameFromPath(file.file)]) }}
                           className="p-1 text-dark-muted hover:text-green-400"

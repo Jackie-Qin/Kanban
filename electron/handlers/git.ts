@@ -470,7 +470,17 @@ export function registerGitHandlers() {
     try {
       if (!files || files.length === 0) return true
       const git = getGit(projectPath)
-      await git.checkout(['--', ...files])
+      // Separate tracked (modified/deleted) from untracked files
+      const status = await git.status()
+      const untrackedSet = new Set(
+        status.files
+          .filter(f => f.working_dir === '?' && f.index === '?')
+          .map(f => f.path)
+      )
+      const trackedFiles = files.filter(f => !untrackedSet.has(f))
+      const untrackedFiles = files.filter(f => untrackedSet.has(f))
+      if (trackedFiles.length > 0) await git.checkout(['--', ...trackedFiles])
+      if (untrackedFiles.length > 0) await git.raw(['clean', '-f', '--', ...untrackedFiles])
       return true
     } catch (error) {
       console.error('Git discard error:', error)
