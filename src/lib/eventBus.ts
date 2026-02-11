@@ -14,7 +14,7 @@ type EventMap = {
   'panel:focus': { panelId: string }
   'workspace:open-file': { filePath: string; line?: number }
   'terminal:add': Record<string, never>
-  'terminal:activity-done': { terminalId: string; terminalName: string; projectName: string }
+  'terminal:activity-done': { terminalId: string; terminalName: string; projectName: string; projectPath: string }
 }
 
 type Handler<T> = (data: T) => void

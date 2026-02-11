@@ -259,7 +259,7 @@ export default function Terminal({
             const duration = lastDataRef.current - activityStartRef.current
             if (duration >= MIN_ACTIVE_DURATION_MS) {
               const projectName = projectPath.split('/').pop() || projectPath
-              eventBus.emit('terminal:activity-done', { terminalId, terminalName, projectName })
+              eventBus.emit('terminal:activity-done', { terminalId, terminalName, projectName, projectPath })
             }
             isOutputActiveRef.current = false
           }
