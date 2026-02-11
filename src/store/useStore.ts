@@ -131,6 +131,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   deleteProject: (id) => {
+    // Kill live PTY processes for this project's terminals
+    electron.ptyKillProject(id)
     // Clean up persisted terminal state and buffers
     electron.deleteTerminalState(id)
     electron.deleteTerminalBuffers(id)

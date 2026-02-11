@@ -45,6 +45,7 @@ export default function Terminal({
   // `viewportY >= baseY` snapshot that could give false negatives after
   // buffer reflow (the root cause of the split-view "jump to top" bug).
   const userScrolledUpRef = useRef(false)
+  const isFittingRef = useRef(false)
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
   // Fit terminal to container, scroll to bottom unless user scrolled up
@@ -56,7 +57,9 @@ export default function Terminal({
         try {
           const term = xtermRef.current
 
+          isFittingRef.current = true
           fitAddonRef.current.fit()
+          isFittingRef.current = false
           const { cols, rows } = term
 
           if (ptyCreatedRef.current) {
@@ -137,6 +140,10 @@ export default function Terminal({
     // clear it when they scroll back down.  This drives fitTerminal's
     // decision to auto-scroll, replacing the old viewportY>=baseY snapshot.
     const scrollDisposable = xterm.onScroll(() => {
+      // Ignore scroll events fired during fit() reflow — the buffer
+      // rewrap can temporarily set viewportY to 0, which would falsely
+      // mark the user as "scrolled up" and prevent auto-scroll.
+      if (isFittingRef.current) return
       const buf = xterm.buffer.active
       userScrolledUpRef.current = buf.viewportY < buf.baseY
     })

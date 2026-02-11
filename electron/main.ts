@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
-import { loadSettings, setMainWindowRef, setAutoSyncEnabled, setAutoSaveEnabled } from './shared'
-import { setMainWindow, killAllPty, createPty, writePty, resizePty, killPty, hasPty, reconnectPty } from './pty'
+import { loadSettings, saveSettings, setMainWindowRef, setAutoSyncEnabled, setAutoSaveEnabled } from './shared'
+import { setMainWindow, killAllPty, killProjectPtys, createPty, writePty, resizePty, killPty, hasPty, reconnectPty } from './pty'
 import { createMenu } from './menu'
 import { checkForUpdates, registerUpdateHandlers } from './updater'
 import { registerDataHandlers, startFileWatcher, stopFileWatcher } from './handlers/data'
@@ -10,7 +10,7 @@ import { registerFsHandlers } from './handlers/fs'
 import { registerTerminalStateHandlers } from './handlers/terminal-state'
 import { registerAttachmentHandlers } from './handlers/attachments'
 import { registerSearchHandlers } from './handlers/search'
-import { initDatabase, closeDatabase, getAllProjects } from './database'
+import { initDatabase, closeDatabase, getAllProjects, getAppState } from './database'
 
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
@@ -106,6 +106,11 @@ ipcMain.handle('pty-kill', (_event, terminalId: string) => {
   return true
 })
 
+ipcMain.handle('pty-kill-project', (_event, projectId: string) => {
+  killProjectPtys(projectId)
+  return true
+})
+
 // App lifecycle
 app.whenReady().then(async () => {
   const settings = await loadSettings()
@@ -123,16 +128,33 @@ app.whenReady().then(async () => {
   const terminalStates = settings.terminalStates || {}
   const projects = getAllProjects() as { id: string; path: string }[]
   const pathMap = new Map(projects.map(p => [p.id, p.path]))
+  const closedIdsStr = getAppState('closedProjectIds')
+  const closedIds = new Set<string>(closedIdsStr ? JSON.parse(closedIdsStr) : [])
+  const staleProjectIds: string[] = []
   let prewarmDelay = 500
   for (const [projectId, state] of Object.entries(terminalStates)) {
     const projPath = pathMap.get(projectId)
-    if (!projPath) continue
-    for (const terminal of state.terminals) {
-      if (!hasPty(terminal.id)) {
-        setTimeout(() => createPty(terminal.id, projPath), prewarmDelay)
-        prewarmDelay += 200
-      }
+    if (!projPath) {
+      staleProjectIds.push(projectId)
+      continue
     }
+    if (closedIds.has(projectId)) continue
+    for (const terminal of state.terminals) {
+      const tid = terminal.id
+      const cwd = projPath
+      setTimeout(() => {
+        if (!hasPty(tid)) createPty(tid, cwd)
+      }, prewarmDelay)
+      prewarmDelay += 200
+    }
+  }
+  // Clean up stale terminal states for deleted projects
+  if (staleProjectIds.length > 0) {
+    for (const id of staleProjectIds) {
+      delete terminalStates[id]
+    }
+    settings.terminalStates = terminalStates
+    saveSettings(settings)
   }
 
   // Check for updates on startup (production only)

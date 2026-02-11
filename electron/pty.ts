@@ -121,6 +121,20 @@ export function killPty(terminalId: string): void {
   outputBuffers.delete(terminalId)
 }
 
+export function killProjectPtys(projectId: string): void {
+  for (const [terminalId, process] of ptyProcesses) {
+    if (terminalId.startsWith(projectId)) {
+      try {
+        process.pty.kill()
+      } catch (error) {
+        console.error(`Failed to kill PTY ${terminalId}:`, error)
+      }
+      ptyProcesses.delete(terminalId)
+      outputBuffers.delete(terminalId)
+    }
+  }
+}
+
 export function killAllPty(): void {
   ptyProcesses.forEach((process, terminalId) => {
     try {

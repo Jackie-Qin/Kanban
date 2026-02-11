@@ -90,6 +90,7 @@ declare global {
       ptyWrite: (terminalId: string, data: string) => Promise<boolean>
       ptyResize: (terminalId: string, cols: number, rows: number) => Promise<boolean>
       ptyKill: (terminalId: string) => Promise<boolean>
+      ptyKillProject: (projectId: string) => Promise<boolean>
       ptyExists: (terminalId: string) => Promise<boolean>
       ptyReconnect: (terminalId: string) => Promise<string | null>
       onPtyData: (callback: (data: { terminalId: string; data: string }) => void) => () => void

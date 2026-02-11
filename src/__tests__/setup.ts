@@ -10,6 +10,7 @@ const mockElectron = {
     closedProjectIds: [],
     layouts: {}
   }),
+  ptyKillProject: vi.fn().mockResolvedValue(true),
   deleteTerminalState: vi.fn(),
   deleteTerminalBuffers: vi.fn(),
   deleteTaskAttachments: vi.fn(),

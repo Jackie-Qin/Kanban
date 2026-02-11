@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ptyResize: (terminalId: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-resize', terminalId, cols, rows),
   ptyKill: (terminalId: string) => ipcRenderer.invoke('pty-kill', terminalId),
+  ptyKillProject: (projectId: string) => ipcRenderer.invoke('pty-kill-project', projectId),
   ptyExists: (terminalId: string) => ipcRenderer.invoke('pty-exists', terminalId),
   ptyReconnect: (terminalId: string) => ipcRenderer.invoke('pty-reconnect', terminalId),
   onPtyData: (callback: (data: { terminalId: string; data: string }) => void) => {
