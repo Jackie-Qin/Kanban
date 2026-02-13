@@ -22,6 +22,7 @@ export const HOTKEY_ACTIONS: HotkeyAction[] = [
   { id: 'switch-project-right', label: 'Next project', category: 'general', defaultBinding: { key: 'ArrowRight', meta: true } },
   { id: 'new-terminal', label: 'New terminal tab', category: 'terminal', defaultBinding: { key: 't', meta: true } },
   { id: 'clear-terminal', label: 'Clear terminal', category: 'terminal', defaultBinding: { key: 'k', meta: true } },
+  { id: 'find-in-terminal', label: 'Find in terminal', category: 'terminal', defaultBinding: { key: 'f', meta: true } },
   { id: 'terminal-1', label: 'Terminal 1', category: 'terminal', defaultBinding: { key: '1', meta: true } },
   { id: 'terminal-2', label: 'Terminal 2', category: 'terminal', defaultBinding: { key: '2', meta: true } },
   { id: 'terminal-3', label: 'Terminal 3', category: 'terminal', defaultBinding: { key: '3', meta: true } },

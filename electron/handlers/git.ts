@@ -9,6 +9,26 @@ const gitWatchers: Map<string, fs.FSWatcher> = new Map()
 const gitWatcherRefs: Map<string, number> = new Map()
 const gitWatchDebounces: Map<string, NodeJS.Timeout> = new Map()
 
+// Resolve the actual .git directory (handles worktrees where .git is a file)
+function resolveGitDir(projectPath: string): string | null {
+  const gitPath = path.join(projectPath, '.git')
+  if (!fs.existsSync(gitPath)) return null
+
+  const stat = fs.statSync(gitPath)
+  if (stat.isDirectory()) return gitPath
+
+  // Worktree: .git is a file with "gitdir: /path/to/actual/git/dir"
+  if (stat.isFile()) {
+    const content = fs.readFileSync(gitPath, 'utf-8').trim()
+    const match = content.match(/^gitdir:\s*(.+)$/)
+    if (match) {
+      const resolved = path.isAbsolute(match[1]) ? match[1] : path.resolve(projectPath, match[1])
+      if (fs.existsSync(resolved)) return resolved
+    }
+  }
+  return null
+}
+
 function startGitWatcher(projectPath: string) {
   if (gitWatchers.has(projectPath)) {
     const refs = gitWatcherRefs.get(projectPath) || 0
@@ -16,8 +36,8 @@ function startGitWatcher(projectPath: string) {
     return
   }
 
-  const gitDir = path.join(projectPath, '.git')
-  if (!fs.existsSync(gitDir)) return
+  const gitDir = resolveGitDir(projectPath)
+  if (!gitDir) return
 
   try {
     const watcher = fs.watch(gitDir, { recursive: true }, (_eventType, filename) => {
@@ -97,6 +117,8 @@ interface GitCommit {
   filesChanged?: number
   insertions?: number
   deletions?: number
+  refs?: string[]
+  parents?: string[]
 }
 
 interface GitDiffFile {
@@ -333,17 +355,55 @@ export function registerGitHandlers() {
   ipcMain.handle('git-log', async (_event, projectPath: string, branch?: string, limit = 20): Promise<GitCommit[]> => {
     try {
       const git = getGit(projectPath)
-      const options = branch ? { maxCount: limit, from: branch } : { maxCount: limit }
-      const log = await git.log(options)
+      const isRepo = await git.checkIsRepo()
+      if (!isRepo) return []
 
-      return log.all.map((commit) => ({
-        hash: commit.hash,
-        shortHash: commit.hash.substring(0, 7),
-        message: commit.message,
-        author: commit.author_name,
-        authorEmail: commit.author_email,
-        date: commit.date
-      }))
+      const SEP = '%x1f'
+      const format = `%H${SEP}%P${SEP}%s${SEP}%aN${SEP}%aE${SEP}%aI${SEP}%D`
+      const args = ['log', '--topo-order', `--max-count=${limit}`, `--format=${format}`]
+      if (branch) args.push(branch)
+
+      const raw = await git.raw(args)
+      if (!raw?.trim()) return []
+
+      return raw.trim().split('\n').map(line => {
+        const parts = line.split('\x1f')
+        const hash = parts[0] || ''
+        const parentStr = parts[1] || ''
+        const message = parts[2] || ''
+        const authorName = parts[3] || ''
+        const authorEmail = parts[4] || ''
+        const date = parts[5] || ''
+        const decoration = parts[6] || ''
+
+        const parents = parentStr.trim().split(' ').filter(Boolean)
+
+        const refs: string[] = []
+        if (decoration.trim()) {
+          for (const ref of decoration.split(',')) {
+            const trimmed = ref.trim()
+            if (!trimmed || trimmed === 'HEAD' || trimmed === 'origin/HEAD') continue
+            if (trimmed.startsWith('HEAD -> ')) {
+              refs.push(trimmed.substring(8))
+            } else if (trimmed.startsWith('tag: ')) {
+              refs.push(trimmed)
+            } else {
+              refs.push(trimmed)
+            }
+          }
+        }
+
+        return {
+          hash,
+          shortHash: hash.substring(0, 7),
+          message,
+          author: authorName,
+          authorEmail,
+          date,
+          refs: refs.length > 0 ? refs : undefined,
+          parents: parents.length > 0 ? parents : undefined,
+        }
+      })
     } catch (error) {
       console.error('Git log error:', error)
       return []
@@ -353,7 +413,7 @@ export function registerGitHandlers() {
   ipcMain.handle('git-commit-details', async (_event, projectPath: string, hash: string): Promise<GitCommit & { files: GitDiffFile[] }> => {
     try {
       const git = getGit(projectPath)
-      const show = await git.show([hash, '--stat', '--format=%H%n%s%n%an%n%ae%n%aI'])
+      const show = await git.show([hash, '--numstat', '--format=%H%n%s%n%an%n%ae%n%aI'])
 
       const lines = show.split('\n')
       const fullHash = lines[0]
@@ -363,15 +423,24 @@ export function registerGitHandlers() {
       const date = lines[4]
 
       const files: GitDiffFile[] = []
-      for (let i = 6; i < lines.length - 2; i++) {
-        const line = lines[i]
-        if (line.includes('|')) {
-          const parts = line.split('|')
-          const file = parts[0].trim()
-          const stats = parts[1].trim()
-          const insertions = (stats.match(/\+/g) || []).length
-          const deletions = (stats.match(/-/g) || []).length
-          files.push({ file, insertions, deletions, binary: stats.includes('Bin') })
+      for (let i = 6; i < lines.length; i++) {
+        const line = lines[i].trim()
+        if (!line) continue
+        // numstat format: "insertions\tdeletions\tfile" or "-\t-\tfile" for binary
+        const match = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/)
+        if (match) {
+          const binary = match[1] === '-'
+          const insertions = binary ? 0 : parseInt(match[1], 10)
+          const deletions = binary ? 0 : parseInt(match[2], 10)
+          // Handle renames: "old => new" or "{old => new}/path"
+          let file = match[3]
+          const renameMatch = file.match(/^(.*)?\{(.+?) => (.+?)\}(.*)$/)
+          if (renameMatch) {
+            file = renameMatch[1] + renameMatch[3] + renameMatch[4]
+          } else if (file.includes(' => ')) {
+            file = file.split(' => ')[1]
+          }
+          files.push({ file, insertions, deletions, binary })
         }
       }
 

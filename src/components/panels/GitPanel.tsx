@@ -1,9 +1,89 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { IDockviewPanelProps } from 'dockview'
 import { electron, GitStatus, GitBranch, GitCommit, GitDiffFile, GitChangedFile } from '../../lib/electron'
 import { gitCache } from '../../lib/projectCache'
 import { eventBus } from '../../lib/eventBus'
 import FileIcon from '../FileIcon'
+
+// === Git Graph ===
+const GRAPH_COLORS = ['#4f8aed', '#e06c75', '#98c379', '#d19a66', '#c678dd', '#56b6c2', '#e5c07b', '#f44747']
+const COL_W = 12
+const ROW_H = 26
+
+interface GraphEdge { fromCol: number; toCol: number; colorIdx: number }
+interface GraphRow { col: number; isMerge: boolean; colorIdx: number; upper: GraphEdge[]; lower: GraphEdge[]; maxCol: number }
+
+function computeGraph(commits: GitCommit[]): GraphRow[] {
+  const cols: (string | null)[] = []
+  const cc: number[] = [] // color per column
+  const result: GraphRow[] = []
+  let nc = 0
+
+  for (const commit of commits) {
+    const parents = commit.parents || []
+    const inc: number[] = []
+    for (let i = 0; i < cols.length; i++) if (cols[i] === commit.hash) inc.push(i)
+
+    let cCol: number, ci: number
+    if (inc.length > 0) {
+      cCol = inc[0]; ci = cc[cCol]
+    } else {
+      cCol = cols.indexOf(null); if (cCol === -1) cCol = cols.length
+      cols[cCol] = commit.hash; ci = nc++ % GRAPH_COLORS.length; cc[cCol] = ci
+    }
+
+    // Upper edges
+    const upper: GraphEdge[] = []
+    for (let i = 0; i < cols.length; i++) {
+      if (cols[i] === null) continue
+      upper.push(inc.includes(i)
+        ? { fromCol: i, toCol: cCol, colorIdx: cc[i] }
+        : { fromCol: i, toCol: i, colorIdx: cc[i] })
+    }
+
+    // Update columns
+    for (const ic of inc.slice(1)) cols[ic] = null
+    if (parents.length === 0) { cols[cCol] = null }
+    else {
+      cols[cCol] = parents[0]
+      for (let p = 1; p < parents.length; p++) {
+        if (cols.indexOf(parents[p]) === -1) {
+          let n = cols.indexOf(null); if (n === -1) n = cols.length
+          cols[n] = parents[p]; cc[n] = nc++ % GRAPH_COLORS.length
+        }
+      }
+    }
+
+    // Lower edges
+    const lower: GraphEdge[] = []
+    const handled = new Set<number>()
+    if (parents.length > 0 && cols[cCol] !== null) {
+      lower.push({ fromCol: cCol, toCol: cCol, colorIdx: cc[cCol] }); handled.add(cCol)
+    }
+    for (let p = 1; p < parents.length; p++) {
+      const pc = cols.indexOf(parents[p])
+      if (pc !== -1 && !handled.has(pc)) { lower.push({ fromCol: cCol, toCol: pc, colorIdx: cc[pc] }); handled.add(pc) }
+    }
+    for (let i = 0; i < cols.length; i++) {
+      if (cols[i] !== null && !handled.has(i)) { lower.push({ fromCol: i, toCol: i, colorIdx: cc[i] }) }
+    }
+
+    while (cols.length > 0 && cols[cols.length - 1] === null) cols.pop()
+
+    let maxCol = cCol
+    for (const e of upper) maxCol = Math.max(maxCol, e.fromCol, e.toCol)
+    for (const e of lower) maxCol = Math.max(maxCol, e.fromCol, e.toCol)
+    result.push({ col: cCol, isMerge: parents.length > 1, colorIdx: ci, upper, lower, maxCol })
+  }
+  return result
+}
+
+function edgePath(fromCol: number, fromY: number, toCol: number, toY: number): string {
+  const x1 = fromCol * COL_W + COL_W / 2, x2 = toCol * COL_W + COL_W / 2
+  if (x1 === x2) return `M${x1},${fromY}L${x2},${toY}`
+  const my = (fromY + toY) / 2
+  return `M${x1},${fromY}C${x1},${my} ${x2},${my} ${x2},${toY}`
+}
 
 interface GitPanelParams {
   projectId: string
@@ -70,6 +150,17 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
   const [lastClickedFileKey, setLastClickedFileKey] = useState<string | null>(null)
 
+  // Collapsible sections
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  const toggleSection = (section: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev)
+      if (next.has(section)) next.delete(section)
+      else next.add(section)
+      return next
+    })
+  }
+
   // Track whether this panel tab is active (visible)
   const [isActive, setIsActive] = useState(false)
 
@@ -125,6 +216,13 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
 
   const stagedFiles = changedFiles.filter(f => f.staged)
   const unstagedFiles = changedFiles.filter(f => !f.staged)
+
+  // Graph computation
+  const graphData = useMemo(() => computeGraph(commits), [commits])
+  const graphWidth = useMemo(() => {
+    const maxCol = graphData.reduce((max, row) => Math.max(max, row.maxCol), 0)
+    return (maxCol + 1) * COL_W + 4
+  }, [graphData])
 
   const fetchData = useCallback(async () => {
     if (!projectPath) return
@@ -595,14 +693,15 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
             {/* Staged Changes */}
             {stagedFiles.length > 0 && (
               <div>
-                <div className="flex items-center justify-between px-4 py-2 bg-dark-hover sticky top-0 z-10">
-                  <span className="text-sm font-medium text-green-400">
+                <div className="flex items-center justify-between px-4 py-1.5 bg-dark-hover sticky top-0 z-10 cursor-pointer select-none" onClick={() => toggleSection('staged')}>
+                  <span className="text-sm font-medium text-green-400 flex items-center gap-1">
+                    <svg className={`w-3 h-3 flex-shrink-0 transition-transform ${collapsedSections.has('staged') ? '' : 'rotate-90'}`} viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z" /></svg>
                     Staged ({stagedFiles.length})
                     {selectedStagedFiles.length > 0 && (
                       <span className="text-dark-muted font-normal"> · {selectedStagedFiles.length} selected</span>
                     )}
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     {selectedStagedFiles.length > 0 && (
                       <button
                         onClick={handleUnstageSelected}
@@ -621,7 +720,7 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
                     </button>
                   </div>
                 </div>
-                {stagedFiles.map((file, index) => {
+                {!collapsedSections.has('staged') && stagedFiles.map((file, index) => {
                   const { filename, directory } = getFileDisplayParts(file.file)
                   const statusInfo = getStatusLetter(file)
                   const isSelected = selectedFiles.has(`staged:${file.file}`)
@@ -658,14 +757,15 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
             {/* Unstaged Changes */}
             {unstagedFiles.length > 0 && (
               <div>
-                <div className="flex items-center justify-between px-4 py-2 bg-dark-hover sticky top-0 z-10">
-                  <span className="text-sm font-medium text-yellow-400">
+                <div className="flex items-center justify-between px-4 py-1.5 bg-dark-hover sticky top-0 z-10 cursor-pointer select-none" onClick={() => toggleSection('changes')}>
+                  <span className="text-sm font-medium text-yellow-400 flex items-center gap-1">
+                    <svg className={`w-3 h-3 flex-shrink-0 transition-transform ${collapsedSections.has('changes') ? '' : 'rotate-90'}`} viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z" /></svg>
                     Changes ({unstagedFiles.length})
                     {selectedUnstagedFiles.length > 0 && (
                       <span className="text-dark-muted font-normal"> · {selectedUnstagedFiles.length} selected</span>
                     )}
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     {selectedUnstagedFiles.length > 0 ? (
                       <>
                         <button
@@ -703,7 +803,7 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
                     )}
                   </div>
                 </div>
-                {unstagedFiles.map((file, index) => {
+                {!collapsedSections.has('changes') && unstagedFiles.map((file, index) => {
                   const { filename, directory } = getFileDisplayParts(file.file)
                   const statusInfo = getStatusLetter(file)
                   const isSelected = selectedFiles.has(`unstaged:${file.file}`)
@@ -778,66 +878,82 @@ export default function GitPanel({ api, params }: IDockviewPanelProps<GitPanelPa
 
         {/* Recent Commits with Graph */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          <div className="px-4 py-2 bg-dark-hover text-sm font-medium flex-shrink-0">
+          <div
+            className="px-4 py-1.5 bg-dark-hover text-sm font-medium flex-shrink-0 cursor-pointer select-none flex items-center gap-1"
+            onClick={() => toggleSection('commits')}
+          >
+            <svg className={`w-3 h-3 flex-shrink-0 transition-transform ${collapsedSections.has('commits') ? '' : 'rotate-90'}`} viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z" /></svg>
             Recent Commits
           </div>
           <div className="overflow-auto flex-1">
-            {commits.map((commit, index) => {
-              const isLocal = status ? index < status.ahead : false
-              const isFirst = index === 0
-              const isLast = index === commits.length - 1
-              const isOriginHead = status ? index === status.ahead : false
-              const dotColor = isLocal ? 'bg-green-400' : 'bg-blue-400'
-              const lineColor = isLocal ? 'bg-green-400/40' : 'bg-blue-400/40'
-              // Next commit's line color (for bottom segment)
-              const nextIsLocal = status ? (index + 1) < status.ahead : false
-              const bottomLineColor = isLast ? 'bg-transparent' : (nextIsLocal ? 'bg-green-400/40' : 'bg-blue-400/40')
+            {!collapsedSections.has('commits') && commits.map((commit, index) => {
+              const gr = graphData[index]
+              if (!gr) return null
+              const color = GRAPH_COLORS[gr.colorIdx % GRAPH_COLORS.length]
+              const cx = gr.col * COL_W + COL_W / 2
+              const midY = ROW_H / 2
 
               return (
                 <div
                   key={commit.hash}
                   className="flex hover:bg-dark-hover cursor-pointer"
+                  style={{ height: ROW_H }}
                   onClick={() => handleCommitClick(commit)}
                   onMouseEnter={(e) => handleCommitHover(commit, e)}
                   onMouseLeave={handleCommitHoverLeave}
                 >
-                  {/* Graph column */}
-                  <div className="w-8 flex-shrink-0 flex flex-col items-center">
-                    {/* Top line segment */}
-                    <div className={`w-0.5 flex-1 ${isFirst ? 'bg-transparent' : lineColor}`} />
-                    {/* Dot */}
-                    <div className={`w-2.5 h-2.5 rounded-full ${dotColor} flex-shrink-0`} />
-                    {/* Bottom line segment */}
-                    <div className={`w-0.5 flex-1 ${bottomLineColor}`} />
-                  </div>
+                  {/* Graph SVG */}
+                  <svg width={graphWidth} height={ROW_H} className="flex-shrink-0">
+                    {/* Upper edges */}
+                    {index > 0 && gr.upper.map((e, i) => (
+                      <path
+                        key={`u${i}`}
+                        d={edgePath(e.fromCol, 0, e.toCol, midY)}
+                        fill="none"
+                        stroke={GRAPH_COLORS[e.colorIdx % GRAPH_COLORS.length]}
+                        strokeWidth={2}
+                      />
+                    ))}
+                    {/* Lower edges */}
+                    {gr.lower.map((e, i) => (
+                      <path
+                        key={`l${i}`}
+                        d={edgePath(e.fromCol, midY, e.toCol, ROW_H)}
+                        fill="none"
+                        stroke={GRAPH_COLORS[e.colorIdx % GRAPH_COLORS.length]}
+                        strokeWidth={2}
+                      />
+                    ))}
+                    {/* Commit dot */}
+                    {gr.isMerge ? (
+                      <>
+                        <circle cx={cx} cy={midY} r={5} fill="#1a1a1a" stroke={color} strokeWidth={2} />
+                        <circle cx={cx} cy={midY} r={2} fill={color} />
+                      </>
+                    ) : (
+                      <circle cx={cx} cy={midY} r={4} fill={color} />
+                    )}
+                  </svg>
 
                   {/* Commit info */}
-                  <div className="flex-1 min-w-0 py-1.5 pr-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm truncate flex-1">{commit.message}</span>
-                      <span className="text-xs text-dark-muted flex-shrink-0">{formatRelativeTime(commit.date)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className={`font-mono text-[10px] ${isLocal ? 'text-green-400/70' : 'text-blue-400/70'}`}>{commit.shortHash}</span>
-                      {/* Local HEAD badge */}
-                      {isFirst && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-medium bg-green-400/15 text-green-400 border border-green-400/30">
-                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                          </svg>
-                          {status?.branch}
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-3 overflow-hidden">
+                    <span className="text-sm truncate min-w-0">{commit.message}</span>
+                    {commit.refs && commit.refs.map((ref) => {
+                      const isRemote = ref.startsWith('origin/')
+                      const isTag = ref.startsWith('tag: ')
+                      const bgColor = isTag ? 'bg-yellow-400/15' : isRemote ? 'bg-blue-400/15' : 'bg-green-400/15'
+                      const textColor = isTag ? 'text-yellow-400' : isRemote ? 'text-blue-400' : 'text-green-400'
+                      const borderColor = isTag ? 'border-yellow-400/30' : isRemote ? 'border-blue-400/30' : 'border-green-400/30'
+                      return (
+                        <span
+                          key={ref}
+                          className={`inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-medium flex-shrink-0 ${bgColor} ${textColor} border ${borderColor}`}
+                        >
+                          {ref}
                         </span>
-                      )}
-                      {/* Origin HEAD badge */}
-                      {isOriginHead && status && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-medium bg-blue-400/15 text-blue-400 border border-blue-400/30">
-                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                          </svg>
-                          origin/{status.branch}
-                        </span>
-                      )}
-                    </div>
+                      )
+                    })}
+                    <span className="text-xs text-dark-muted flex-shrink-0 ml-auto">{commit.author}</span>
                   </div>
                 </div>
               )

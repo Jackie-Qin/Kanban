@@ -7,6 +7,7 @@ import {
 } from 'dockview'
 import { Task } from '../types'
 import { useStore } from '../store/useStore'
+import { useBadgeStore } from '../store/useBadgeStore'
 import { gitCache, prefetchGitData, prefetchDirData } from '../lib/projectCache'
 import KanbanPanel from './panels/KanbanPanel'
 import TerminalDockPanel from './panels/TerminalDockPanel'
@@ -63,8 +64,47 @@ const PANEL_OPTIONS = [
   { id: 'directory', component: 'directory', title: 'Directory' }
 ]
 
-// Only terminal toggles open/closed. All other panels just switch (activate) in their group.
-const TOGGLE_PANEL_IDS = new Set(['terminal'])
+/** Compute where to re-add a closed panel (group with sibling or directional fallback) */
+function resolvePanelPosition(panelId: string, api: DockviewApi) {
+  const find = (...ids: string[]) => ids.find((id) => api.getPanel(id))
+
+  // Sidebar panels: group with sibling, or place left of center
+  if (panelId === 'directory' || panelId === 'git') {
+    const sibling = panelId === 'directory' ? 'git' : 'directory'
+    if (api.getPanel(sibling))
+      return { position: { referencePanel: sibling, direction: 'within' as const } }
+    const ref = find('kanban', 'editor')
+    if (ref)
+      return {
+        position: { referencePanel: ref, direction: 'left' as const },
+        initialWidth: 250
+      }
+    return {}
+  }
+
+  // Center panels: group with sibling, or place right of sidebar
+  if (panelId === 'kanban' || panelId === 'editor') {
+    const sibling = panelId === 'kanban' ? 'editor' : 'kanban'
+    if (api.getPanel(sibling))
+      return { position: { referencePanel: sibling, direction: 'within' as const } }
+    const ref = find('directory', 'git')
+    if (ref) return { position: { referencePanel: ref, direction: 'right' as const } }
+    return {}
+  }
+
+  // Terminal: place below center panels
+  if (panelId === 'terminal') {
+    const ref = find('kanban', 'editor')
+    if (ref)
+      return {
+        position: { referencePanel: ref, direction: 'below' as const },
+        initialHeight: 220
+      }
+    return {}
+  }
+
+  return {}
+}
 
 export default function WorkspaceLayout({
   projectId,
@@ -79,7 +119,7 @@ export default function WorkspaceLayout({
   const isRestoringRef = useRef(false)
   const [isEmpty, setIsEmpty] = useState(false)
   const [openPanelIds, setOpenPanelIds] = useState<string[]>([])
-  const [activePanelId, setActivePanelId] = useState<string | null>(null)
+  const [visiblePanelIds, setVisiblePanelIds] = useState<string[]>([])
 
   // Debounced resize: replaces dockview's per-frame ResizeObserver with a batched one
   useEffect(() => {
@@ -101,13 +141,17 @@ export default function WorkspaceLayout({
     }
   }, [])
 
-  // Check if workspace is empty and track open panels
+  // Check if workspace is empty, track open panels, and compute visible panels per group
   const updatePanelState = useCallback(() => {
     if (apiRef.current) {
-      const panels = apiRef.current.panels
-      setIsEmpty(panels.length === 0)
-      setOpenPanelIds(panels.map((p) => p.id))
-      setActivePanelId(apiRef.current.activePanel?.id ?? null)
+      const api = apiRef.current
+      setIsEmpty(api.panels.length === 0)
+      setOpenPanelIds(api.panels.map((p) => p.id))
+      setVisiblePanelIds(
+        api.groups
+          .map((g) => g.activePanel?.id)
+          .filter((id): id is string => !!id)
+      )
     }
   }, [])
 
@@ -124,7 +168,7 @@ export default function WorkspaceLayout({
     }
   }, [projectId])
 
-  // Add a single panel
+  // Add a single panel at its natural position (sibling grouping or directional fallback)
   const handleAddPanel = useCallback(
     (panelId: string) => {
       if (!apiRef.current) return
@@ -137,26 +181,12 @@ export default function WorkspaceLayout({
       const panel = PANEL_OPTIONS.find((p) => p.id === panelId)
       if (!panel) return
 
-      // When re-adding terminal, place it below the kanban/editor area
-      // (same position as default layout) instead of dockview's default (left)
-      const position =
-        panelId === 'terminal'
-          ? (() => {
-              const kanban = apiRef.current!.getPanel('kanban')
-              const editor = apiRef.current!.getPanel('editor')
-              const ref = kanban || editor
-              return ref
-                ? { referencePanel: ref.id, direction: 'below' as const }
-                : undefined
-            })()
-          : undefined
-
       apiRef.current.addPanel({
         id: panel.id,
         component: panel.component,
         title: panel.title,
         params,
-        ...(position && { position, initialHeight: 220 })
+        ...resolvePanelPosition(panelId, apiRef.current)
       })
 
       updatePanelState()
@@ -164,31 +194,25 @@ export default function WorkspaceLayout({
     [projectId, projectPath, onTaskClick, updatePanelState]
   )
 
-  // Toggle a panel open/closed (for activity bar)
+  // Toggle a panel: close if visible, activate if hidden tab, create if missing
   const handleTogglePanel = useCallback(
     (panelId: string) => {
       if (!apiRef.current) return
 
       const existingPanel = apiRef.current.getPanel(panelId)
 
-      if (TOGGLE_PANEL_IDS.has(panelId)) {
-        // Terminal: toggle open/closed
-        if (existingPanel) {
-          if (existingPanel.api.isActive) {
-            existingPanel.api.close()
-          } else {
-            existingPanel.api.setActive()
-          }
+      if (existingPanel) {
+        // Check if panel is the visible (active) tab in its group
+        const isVisible = apiRef.current.groups.some(
+          (g) => g.activePanel?.id === panelId
+        )
+        if (isVisible) {
+          existingPanel.api.close()
         } else {
-          handleAddPanel(panelId)
+          existingPanel.api.setActive()
         }
       } else {
-        // All other panels: always activate (switch within their group)
-        if (existingPanel) {
-          existingPanel.api.setActive()
-        } else {
-          handleAddPanel(panelId)
-        }
+        handleAddPanel(panelId)
       }
 
       // Defer state update so dockview has time to process
@@ -332,9 +356,9 @@ export default function WorkspaceLayout({
       // Check initial state
       updatePanelState()
 
-      // Track active panel changes reactively
+      // Track active panel changes reactively (recomputes visible panels per group)
       const activeDisposable = event.api.onDidActivePanelChange(() => {
-        setActivePanelId(event.api.activePanel?.id ?? null)
+        updatePanelState()
       })
 
       // Save layout on structural changes only (panel add/remove/move).
@@ -409,6 +433,18 @@ export default function WorkspaceLayout({
     }
   }, [projectId, projectPath, onTaskClick])
 
+  // Dismiss project badge when switching to this project
+  useEffect(() => {
+    useBadgeStore.getState().dismissProjectBadge(projectId)
+  }, [projectId])
+
+  // Dismiss terminal badge when terminal panel is visible for current project
+  useEffect(() => {
+    if (visiblePanelIds.includes('terminal')) {
+      useBadgeStore.getState().dismissTerminalBadge(projectId)
+    }
+  }, [visiblePanelIds, projectId])
+
   // Prefetch git + directory data for other open projects during idle time
   const { projects, closedProjectIds } = useStore()
   useEffect(() => {
@@ -438,11 +474,11 @@ export default function WorkspaceLayout({
     <div className="h-full w-full flex">
       <ActivityBar
         openPanelIds={openPanelIds}
-        activePanelId={activePanelId}
+        visiblePanelIds={visiblePanelIds}
         onTogglePanel={handleTogglePanel}
         onResetLayout={handleResetLayout}
       />
-      <div ref={containerRef} className="h-full flex-1 relative">
+      <div ref={containerRef} className="h-full flex-1 min-w-0 relative">
         <DockviewReact
           components={components}
           watermarkComponent={Watermark}

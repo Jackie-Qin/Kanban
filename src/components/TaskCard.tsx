@@ -113,31 +113,26 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
     }
   }
 
-  if (isSortableDragging) {
-    return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        className="p-3 bg-dark-hover border-2 border-dashed border-dark-border rounded-lg h-24 opacity-40"
-      />
-    )
-  }
-
   return (
     <>
       <div
         ref={setNodeRef}
         style={style}
-        {...attributes}
-        {...listeners}
-        onClick={onClick}
-        onDragOver={handleFileDragOver}
-        onDragLeave={handleFileDragLeave}
-        onDrop={handleFileDrop}
-        className={`p-3 bg-dark-bg border rounded-lg cursor-pointer hover:border-dark-muted transition-colors group relative ${
-          isFileDragOver ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-500/5' : 'border-dark-border'
-        } ${isDragging ? 'shadow-lg ring-2 ring-blue-500' : ''}`}
+        {...(isSortableDragging ? {} : { ...attributes, ...listeners })}
+        onClick={isSortableDragging ? undefined : onClick}
+        onDragOver={isSortableDragging ? undefined : handleFileDragOver}
+        onDragLeave={isSortableDragging ? undefined : handleFileDragLeave}
+        onDrop={isSortableDragging ? undefined : handleFileDrop}
+        className={
+          isSortableDragging
+            ? 'p-3 bg-dark-hover border border-dashed border-dark-border rounded-lg opacity-40'
+            : `p-3 bg-dark-bg border rounded-lg cursor-pointer hover:border-dark-muted transition-colors group relative ${
+                isFileDragOver ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-500/5' : 'border-dark-border'
+              } ${isDragging ? 'shadow-lg ring-2 ring-blue-500' : ''}`
+        }
       >
+        {/* Invisible wrapper preserves exact card height for drag placeholder */}
+        <div className={isSortableDragging ? 'invisible' : undefined}>
         {/* Hover actions */}
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
           {/* Drag to terminal handle */}
@@ -292,6 +287,7 @@ export default function TaskCard({ task, onClick, isDragging, projectPath, onBra
               </span>
             )}
           </div>
+        </div>
         </div>
       </div>
 

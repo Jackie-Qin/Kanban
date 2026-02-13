@@ -202,6 +202,21 @@ function FileTreeItem({
   )
 }
 
+function collectExpandedPaths(nodes: TreeNode[]): Set<string> {
+  const expanded = new Set<string>()
+  for (const node of nodes) {
+    if (node.isDirectory && node.isExpanded) {
+      expanded.add(node.path)
+      if (node.children) {
+        for (const p of collectExpandedPaths(node.children)) {
+          expanded.add(p)
+        }
+      }
+    }
+  }
+  return expanded
+}
+
 export default function DirectoryPanel({ params }: IDockviewPanelProps<DirectoryPanelParams>) {
   const { projectPath, onFileSelect } = params
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -220,6 +235,8 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const dragLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const treeRef = useRef<TreeNode[]>(tree)
+  treeRef.current = tree
 
   // Load initial directory — restore cache instantly, then refresh in background
   useEffect(() => {
@@ -260,6 +277,34 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
       children: entry.isDirectory ? undefined : undefined
     }))
   }, [])
+
+  // Re-read directory contents while preserving folder expansion state
+  const refreshTree = useCallback(async () => {
+    const expandedPaths = collectExpandedPaths(treeRef.current)
+
+    const buildNodes = async (entries: FileEntry[]): Promise<TreeNode[]> => {
+      const nodes: TreeNode[] = []
+      for (const entry of entries) {
+        const node: TreeNode = { ...entry, isExpanded: false }
+        if (entry.isDirectory && expandedPaths.has(entry.path)) {
+          try {
+            const childEntries = await electron.fsReadDirectory(entry.path)
+            node.isExpanded = true
+            node.children = await buildNodes(childEntries)
+          } catch {
+            // Directory may have been removed — leave collapsed
+          }
+        }
+        nodes.push(node)
+      }
+      return nodes
+    }
+
+    const entries = await electron.fsReadDirectory(projectPath)
+    const nodes = await buildNodes(entries)
+    setTree(nodes)
+    dirCache.set(projectPath, nodes)
+  }, [projectPath])
 
   const updateTreeNode = useCallback(
     (nodes: TreeNode[], path: string, updater: (node: TreeNode) => TreeNode): TreeNode[] => {
@@ -379,11 +424,11 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
     if (confirmed) {
       const success = await electron.fsDelete(contextMenu.node.path)
       if (success) {
-        loadDirectory(projectPath)
+        refreshTree()
       }
     }
     setContextMenu(null)
-  }, [contextMenu, projectPath])
+  }, [contextMenu, refreshTree])
 
   const handleCopyPath = useCallback(() => {
     if (!contextMenu?.node) return
@@ -414,11 +459,11 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
     if (newPath !== renamingPath) {
       const success = await electron.fsRename(renamingPath, newPath)
       if (success) {
-        loadDirectory(projectPath)
+        refreshTree()
       }
     }
     setRenamingPath(null)
-  }, [renamingPath, renameValue, projectPath])
+  }, [renamingPath, renameValue, refreshTree])
 
   const handleRenameCancel = useCallback(() => {
     setRenamingPath(null)
@@ -441,8 +486,8 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
       await electron.fsDelete(p)
     }
     setSelectedPaths(new Set())
-    loadDirectory(projectPath)
-  }, [selectedPaths, projectPath])
+    refreshTree()
+  }, [selectedPaths, refreshTree])
 
   const handleCopySelectedPaths = useCallback(() => {
     if (selectedPaths.size === 0) return
@@ -460,17 +505,17 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
         : await electron.fsCreateDirectory(fullPath)
 
     if (success) {
-      loadDirectory(projectPath)
+      refreshTree()
     }
     setIsCreating(null)
     setNewItemName('')
-  }, [newItemName, createPath, isCreating, projectPath])
+  }, [newItemName, createPath, isCreating, refreshTree])
 
   const handleRefresh = useCallback(() => {
     if (projectPath) {
-      loadDirectory(projectPath)
+      refreshTree()
     }
-  }, [projectPath])
+  }, [projectPath, refreshTree])
 
   const handleCollapseAll = useCallback(() => {
     const collapseNodes = (nodes: TreeNode[]): TreeNode[] =>
@@ -506,9 +551,9 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
 
     const success = await electron.fsMove(sourcePath, targetDir)
     if (success) {
-      loadDirectory(projectPath)
+      refreshTree()
     }
-  }, [projectPath])
+  }, [refreshTree])
 
   // Allow dropping on the root tree area (move to project root)
   const handleRootDragOver = useCallback((e: React.DragEvent) => {
@@ -524,9 +569,9 @@ export default function DirectoryPanel({ params }: IDockviewPanelProps<Directory
     if (sourceParent === projectPath) return
     const success = await electron.fsMove(sourcePath, projectPath)
     if (success) {
-      loadDirectory(projectPath)
+      refreshTree()
     }
-  }, [projectPath])
+  }, [projectPath, refreshTree])
 
   // Filter tree based on search query
   const filterTree = useCallback(

@@ -1,8 +1,10 @@
 import { useCallback } from 'react'
+import { useStore } from '../store/useStore'
+import { useBadgeStore } from '../store/useBadgeStore'
 
 interface ActivityBarProps {
   openPanelIds: string[]
-  activePanelId: string | null
+  visiblePanelIds: string[]
   onTogglePanel: (panelId: string) => void
   onResetLayout: () => void
 }
@@ -57,10 +59,14 @@ const BOTTOM_PANELS = ['terminal']
 
 export default function ActivityBar({
   openPanelIds,
-  activePanelId,
+  visiblePanelIds,
   onTogglePanel,
   onResetLayout
 }: ActivityBarProps) {
+  const activeProjectId = useStore(state => state.activeProjectId)
+  const terminalBadges = useBadgeStore(state => state.terminalBadges)
+  const hasTerminalBadge = !!(activeProjectId && terminalBadges.has(activeProjectId))
+
   const handleClick = useCallback(
     (panelId: string) => {
       onTogglePanel(panelId)
@@ -70,16 +76,20 @@ export default function ActivityBar({
 
   const renderIcon = (panelId: string) => {
     const isOpen = openPanelIds.includes(panelId)
-    const active = isOpen && activePanelId === panelId
+    const isVisible = visiblePanelIds.includes(panelId)
+    const showBadge = panelId === 'terminal' && hasTerminalBadge
 
     return (
       <button
         key={panelId}
         onClick={() => handleClick(panelId)}
-        className={`activity-bar-icon ${active ? 'active' : ''} ${isOpen ? 'open' : ''}`}
+        className={`activity-bar-icon ${isVisible ? 'active' : ''} ${isOpen && !isVisible ? 'open' : ''} relative`}
         title={PANEL_LABELS[panelId]}
       >
         {PANEL_ICONS[panelId]}
+        {showBadge && (
+          <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full" />
+        )}
       </button>
     )
   }

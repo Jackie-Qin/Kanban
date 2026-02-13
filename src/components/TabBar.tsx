@@ -1,4 +1,5 @@
 import { useStore } from '../store/useStore'
+import { useBadgeStore } from '../store/useBadgeStore'
 import {
   DndContext,
   closestCenter,
@@ -36,6 +37,7 @@ function SortableTab({
   onClick: () => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
+  const hasBadge = useBadgeStore(state => state.projectBadges.has(project.id))
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: project.id })
 
@@ -52,13 +54,16 @@ function SortableTab({
       {...listeners}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={`px-4 py-1.5 text-sm font-medium cursor-pointer rounded-md transition-colors no-drag ${
+      className={`relative px-4 py-1.5 text-sm font-medium cursor-pointer rounded-md transition-colors no-drag ${
         isActive
           ? 'bg-white/15 text-white'
           : 'text-dark-muted hover:text-dark-text hover:bg-white/5'
       }`}
     >
       {project.name}
+      {hasBadge && (
+        <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full" />
+      )}
     </div>
   )
 }

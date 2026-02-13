@@ -4,14 +4,19 @@ import { electron } from '../lib/electron'
 import { playNotificationSound } from '../lib/notificationSounds'
 import { useNotificationSettings } from '../store/useNotificationSettings'
 import { useStore } from '../store/useStore'
+import { useBadgeStore } from '../store/useBadgeStore'
 
 export default function TerminalNotification() {
   useEffect(() => {
     return eventBus.on('terminal:activity-done', ({ terminalName, projectName, projectPath }) => {
-      // Skip notification if the user is viewing this project
+      // Skip if the user is viewing this project
       const { activeProjectId, projects } = useStore.getState()
-      const activeProject = projects.find(p => p.id === activeProjectId)
-      if (activeProject && activeProject.path === projectPath) return
+      const project = projects.find(p => p.path === projectPath)
+      if (!project) return
+      if (project.id === activeProjectId) return
+
+      // Add red dot badges on project tab + terminal icon
+      useBadgeStore.getState().addBadges(project.id)
 
       const { soundEnabled, sound } = useNotificationSettings.getState()
       if (soundEnabled) {

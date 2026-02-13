@@ -159,76 +159,74 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
           {/* General section */}
-          <h3 className="text-sm font-medium text-dark-muted">General</h3>
-
-          <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
-            <span className="text-sm">App Zoom</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setAppZoom(zoomPercent - 10)}
-                disabled={zoomPercent <= 50}
-                className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-                </svg>
-              </button>
-              <span className="text-sm w-12 text-center font-mono">{zoomPercent}%</span>
-              <button
-                onClick={() => setAppZoom(zoomPercent + 10)}
-                disabled={zoomPercent >= 200}
-                className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
-              {zoomPercent !== 100 && (
+          <div>
+            <h3 className="text-xs font-semibold text-dark-muted uppercase tracking-wider mb-3">General</h3>
+            <div className="flex items-center justify-between px-3 py-2.5 bg-dark-bg rounded-lg">
+              <span className="text-sm">App Zoom</span>
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setAppZoom(100)}
-                  className="px-2 py-1 text-xs text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors"
+                  onClick={() => setAppZoom(zoomPercent - 10)}
+                  disabled={zoomPercent <= 50}
+                  className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
-                  Reset
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                  </svg>
                 </button>
-              )}
+                <span className="text-sm w-12 text-center font-mono">{zoomPercent}%</span>
+                <button
+                  onClick={() => setAppZoom(zoomPercent + 10)}
+                  disabled={zoomPercent >= 200}
+                  className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </button>
+                {zoomPercent !== 100 && (
+                  <button
+                    onClick={() => setAppZoom(100)}
+                    className="px-2 py-1 text-xs text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="border-t border-dark-border" />
+          <div className="border-t border-dark-border/50" />
 
           {/* Notifications section */}
-          <h3 className="text-sm font-medium text-dark-muted">Notifications</h3>
-
-          <div className="space-y-2">
-            {/* Sound toggle */}
-            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
-              <span className="text-sm">Notification Sound</span>
-              <button
-                onClick={() => setSoundEnabled(!soundEnabled)}
-                className={`relative w-9 h-5 rounded-full transition-colors ${
-                  soundEnabled ? 'bg-blue-600' : 'bg-dark-border'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                    soundEnabled ? 'translate-x-4' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Sound picker */}
-            {soundEnabled && (
-              <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
+          <div>
+            <h3 className="text-xs font-semibold text-dark-muted uppercase tracking-wider mb-3">Notifications</h3>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-3 py-2.5 bg-dark-bg rounded-lg">
                 <span className="text-sm">Sound</span>
-                <div className="flex items-center gap-1.5">
-                  {NOTIFICATION_SOUNDS.map((s) => (
-                    <div key={s.id} className="flex items-center gap-0.5">
+                <button
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  className={`relative w-9 h-5 rounded-full transition-colors ${
+                    soundEnabled ? 'bg-blue-600' : 'bg-dark-border'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                      soundEnabled ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {soundEnabled && (
+                <div className="px-3 py-2.5 bg-dark-bg rounded-lg">
+                  <div className="flex flex-wrap gap-1.5">
+                    {NOTIFICATION_SOUNDS.map((s) => (
                       <button
-                        onClick={() => setSound(s.id)}
-                        className={`px-2 py-1 rounded text-xs transition-colors ${
+                        key={s.id}
+                        onClick={() => { setSound(s.id); playNotificationSound(s.id) }}
+                        className={`px-2.5 py-1.5 rounded-md text-xs transition-colors ${
                           s.id === selectedSound
                             ? 'bg-dark-hover text-dark-text ring-1 ring-dark-border'
                             : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
@@ -236,140 +234,132 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                       >
                         {s.label}
                       </button>
-                      <button
-                        onClick={() => playNotificationSound(s.id)}
-                        className="p-0.5 text-dark-muted hover:text-dark-text rounded transition-colors"
-                        title={`Preview ${s.label}`}
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z" />
-                        </svg>
-                      </button>
-                    </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-dark-border/50" />
+
+          {/* Terminal section */}
+          <div>
+            <h3 className="text-xs font-semibold text-dark-muted uppercase tracking-wider mb-3">Terminal</h3>
+            <div className="space-y-2">
+              {/* Theme */}
+              <div className="px-3 py-2.5 bg-dark-bg rounded-lg">
+                <span className="text-sm text-dark-muted block mb-2">Theme</span>
+                <div className="flex gap-2">
+                  {terminalThemes.map((t) => (
+                    <button
+                      key={t.name}
+                      onClick={() => setTheme(t.name)}
+                      className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-md text-xs transition-colors ${
+                        t.name === themeName
+                          ? 'bg-dark-hover text-dark-text ring-1 ring-dark-border'
+                          : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
+                      }`}
+                    >
+                      <span
+                        className="w-5 h-5 rounded border border-white/10"
+                        style={{ backgroundColor: t.theme.background as string }}
+                      />
+                      <span className="text-[10px] leading-tight">{t.name}</span>
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
 
-          <div className="border-t border-dark-border" />
+              {/* Font Family */}
+              <div className="flex items-center justify-between px-3 py-2.5 bg-dark-bg rounded-lg">
+                <span className="text-sm">Font</span>
+                <select
+                  value={fontFamily}
+                  onChange={(e) => setFontFamily(e.target.value)}
+                  className="px-2 py-1 bg-dark-card border border-dark-border rounded text-sm outline-none focus:border-blue-500 text-dark-text"
+                >
+                  {FONT_FAMILIES.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Terminal section */}
-          <h3 className="text-sm font-medium text-dark-muted">Terminal</h3>
-
-          <div className="space-y-2">
-            {/* Theme */}
-            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
-              <span className="text-sm">Theme</span>
-              <div className="flex items-center gap-1.5">
-                {terminalThemes.map((t) => (
+              {/* Font Size */}
+              <div className="flex items-center justify-between px-3 py-2.5 bg-dark-bg rounded-lg">
+                <span className="text-sm">Font Size</span>
+                <div className="flex items-center gap-2">
                   <button
-                    key={t.name}
-                    onClick={() => setTheme(t.name)}
-                    className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
-                      t.name === themeName
-                        ? 'bg-dark-hover text-dark-text ring-1 ring-dark-border'
-                        : 'text-dark-muted hover:text-dark-text hover:bg-dark-hover'
-                    }`}
-                    title={t.name}
+                    onClick={() => setFontSize(fontSize - 1)}
+                    disabled={fontSize <= MIN_FONT_SIZE}
+                    className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   >
-                    <span
-                      className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                      style={{ backgroundColor: t.theme.background as string }}
-                    />
-                    <span className="hidden sm:inline">{t.name}</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                    </svg>
                   </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Font Family */}
-            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
-              <span className="text-sm">Font</span>
-              <select
-                value={fontFamily}
-                onChange={(e) => setFontFamily(e.target.value)}
-                className="px-2 py-1 bg-dark-card border border-dark-border rounded text-sm outline-none focus:border-blue-500 text-dark-text"
-              >
-                {FONT_FAMILIES.map((f) => (
-                  <option key={f.value} value={f.value}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Font Size */}
-            <div className="flex items-center justify-between p-2 bg-dark-bg rounded-lg">
-              <span className="text-sm">Font Size</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setFontSize(fontSize - 1)}
-                  disabled={fontSize <= MIN_FONT_SIZE}
-                  className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-                  </svg>
-                </button>
-                <span className="text-sm w-8 text-center font-mono">{fontSize}</span>
-                <button
-                  onClick={() => setFontSize(fontSize + 1)}
-                  disabled={fontSize >= MAX_FONT_SIZE}
-                  className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                </button>
+                  <span className="text-sm w-8 text-center font-mono">{fontSize}</span>
+                  <button
+                    onClick={() => setFontSize(fontSize + 1)}
+                    disabled={fontSize >= MAX_FONT_SIZE}
+                    className="w-7 h-7 flex items-center justify-center text-dark-muted hover:text-dark-text hover:bg-dark-hover rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="border-t border-dark-border" />
+          <div className="border-t border-dark-border/50" />
 
           {/* Hotkeys section */}
-          <h3 className="text-sm font-medium text-dark-muted">Keyboard Shortcuts</h3>
+          <div>
+            <h3 className="text-xs font-semibold text-dark-muted uppercase tracking-wider mb-3">Keyboard Shortcuts</h3>
+            <div className="space-y-1">
+              {HOTKEY_ACTIONS.map((action) => {
+                const currentBinding = getBinding(action.id)
+                const isDefault = bindingsEqual(currentBinding, getDefaultBinding(action.id))
+                const isRecording = recordingActionId === action.id
 
-          <div className="space-y-1">
-            {HOTKEY_ACTIONS.map((action) => {
-              const currentBinding = getBinding(action.id)
-              const isDefault = bindingsEqual(currentBinding, getDefaultBinding(action.id))
-              const isRecording = recordingActionId === action.id
-
-              return (
-                <div key={action.id} className="flex items-center justify-between p-2 bg-dark-bg rounded-lg group">
-                  <span className="text-sm text-dark-text">{action.label}</span>
-                  <div className="flex items-center gap-1.5">
-                    {!isDefault && (
+                return (
+                  <div key={action.id} className="flex items-center justify-between px-3 py-2 bg-dark-bg rounded-lg group">
+                    <span className="text-sm text-dark-text">{action.label}</span>
+                    <div className="flex items-center gap-1.5">
+                      {!isDefault && (
+                        <button
+                          onClick={() => resetBinding(action.id)}
+                          className="px-1.5 py-0.5 text-xs text-dark-muted hover:text-dark-text opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Reset to default"
+                        >
+                          Reset
+                        </button>
+                      )}
                       <button
-                        onClick={() => resetBinding(action.id)}
-                        className="px-1.5 py-0.5 text-xs text-dark-muted hover:text-dark-text opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Reset to default"
+                        onClick={() => setRecordingActionId(isRecording ? null : action.id)}
+                        className={`px-2 py-0.5 text-xs font-mono rounded transition-colors min-w-[60px] text-center ${
+                          isRecording
+                            ? 'bg-blue-600/20 border border-blue-500 text-blue-400 animate-pulse'
+                            : `bg-dark-card border border-dark-border text-dark-muted hover:border-dark-muted ${!isDefault ? 'border-blue-500/40 text-blue-400' : ''}`
+                        }`}
                       >
-                        Reset
+                        {isRecording ? 'Press keys...' : formatBinding(currentBinding)}
                       </button>
-                    )}
-                    <button
-                      onClick={() => setRecordingActionId(isRecording ? null : action.id)}
-                      className={`px-2 py-0.5 text-xs font-mono rounded transition-colors min-w-[60px] text-center ${
-                        isRecording
-                          ? 'bg-blue-600/20 border border-blue-500 text-blue-400 animate-pulse'
-                          : `bg-dark-card border border-dark-border text-dark-muted hover:border-dark-muted ${!isDefault ? 'border-blue-500/40 text-blue-400' : ''}`
-                      }`}
-                    >
-                      {isRecording ? 'Press keys...' : formatBinding(currentBinding)}
-                    </button>
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
 
-          <div className="border-t border-dark-border" />
+          <div className="border-t border-dark-border/50" />
 
           {/* Labels section */}
-          <h3 className="text-sm font-medium text-dark-muted">Labels</h3>
+          <h3 className="text-xs font-semibold text-dark-muted uppercase tracking-wider mb-3">Labels</h3>
 
           {/* Existing labels */}
           <div className="space-y-2">

@@ -34,6 +34,8 @@ interface GitCommit {
   filesChanged?: number
   insertions?: number
   deletions?: number
+  refs?: string[]
+  parents?: string[]
 }
 
 interface GitDiffFile {

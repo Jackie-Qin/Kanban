@@ -22,13 +22,13 @@ export interface TerminalTheme {
 const dark: TerminalTheme = {
   name: 'Dark',
   theme: {
-    background: '#14191e',
+    background: '#1a1a1a',
     foreground: '#dbdbdb',
     cursor: '#fefffe',
     cursorAccent: '#000000',
     selectionBackground: '#b3d7ff',
     selectionForeground: '#000000',
-    black: '#14191e',
+    black: '#1a1a1a',
     red: '#b43c29',
     green: '#00c200',
     yellow: '#c7c400',
