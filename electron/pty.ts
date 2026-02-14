@@ -123,7 +123,7 @@ export function killPty(terminalId: string): void {
 
 export function killProjectPtys(projectId: string): void {
   for (const [terminalId, process] of ptyProcesses) {
-    if (terminalId.startsWith(projectId)) {
+    if (terminalId.startsWith(projectId + '-term-')) {
       try {
         process.pty.kill()
       } catch (error) {

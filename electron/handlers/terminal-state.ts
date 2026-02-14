@@ -31,26 +31,27 @@ export function registerTerminalStateHandlers() {
     return true
   })
 
-  ipcMain.handle('save-terminal-buffer', (_event, terminalId: string, content: string) => {
+  ipcMain.handle('save-terminal-buffer', async (_event, terminalId: string, content: string) => {
     ensureBuffersDir()
     const filePath = path.join(TERMINAL_BUFFERS_DIR, `${terminalId}.txt`)
-    fs.writeFileSync(filePath, content, 'utf-8')
+    await fs.promises.writeFile(filePath, content, 'utf-8')
     return true
   })
 
-  ipcMain.handle('load-terminal-buffer', (_event, terminalId: string) => {
+  ipcMain.handle('load-terminal-buffer', async (_event, terminalId: string) => {
     const filePath = path.join(TERMINAL_BUFFERS_DIR, `${terminalId}.txt`)
-    if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath, 'utf-8')
+    try {
+      return await fs.promises.readFile(filePath, 'utf-8')
+    } catch {
+      return null
     }
-    return null
   })
 
   ipcMain.handle('delete-terminal-buffers', (_event, projectId: string) => {
     if (!fs.existsSync(TERMINAL_BUFFERS_DIR)) return true
     const files = fs.readdirSync(TERMINAL_BUFFERS_DIR)
     for (const file of files) {
-      if (file.startsWith(projectId)) {
+      if (file.startsWith(projectId + '-term-')) {
         fs.unlinkSync(path.join(TERMINAL_BUFFERS_DIR, file))
       }
     }
