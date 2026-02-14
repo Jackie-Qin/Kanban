@@ -1,0 +1,77 @@
+{
+  "project": "Kanban",
+  "description": "Feature tracking for long-running agent sessions",
+  "version": "1.2.0",
+  "statuses": {
+    "pass": "Verified working — tests pass, confirmed",
+    "fail": "Not yet implemented or broken",
+    "in_progress": "Currently being worked on",
+    "blocked": "Blocked by dependency or issue"
+  },
+  "features": [
+    {
+      "id": "sqlite-migration",
+      "description": "SQLite persistence with better-sqlite3, WAL mode, auto-migration from JSON",
+      "status": "pass",
+      "dependsOn": [],
+      "attempts": 0,
+      "noProgressStreak": 0
+    },
+    {
+      "id": "handler-split",
+      "description": "Split main.ts into domain handlers (data, git, fs, search, attachments, terminal-state)",
+      "status": "pass",
+      "dependsOn": [],
+      "attempts": 0,
+      "noProgressStreak": 0
+    },
+    {
+      "id": "data-versioning",
+      "description": "Schema versioning with schema_version table and numbered migrations",
+      "status": "pass",
+      "dependsOn": ["sqlite-migration"],
+      "attempts": 0,
+      "noProgressStreak": 0
+    },
+    {
+      "id": "typed-event-bus",
+      "description": "Typed event bus for inter-panel communication (eventBus.ts)",
+      "status": "pass",
+      "dependsOn": [],
+      "attempts": 0,
+      "noProgressStreak": 0
+    },
+    {
+      "id": "ripgrep-search",
+      "description": "Async search with ripgrep fallback to sync implementation",
+      "status": "pass",
+      "dependsOn": [],
+      "attempts": 0,
+      "noProgressStreak": 0
+    },
+    {
+      "id": "error-boundaries",
+      "description": "PanelErrorBoundary wrapping all 5 dockview panels",
+      "status": "pass",
+      "dependsOn": [],
+      "attempts": 0,
+      "noProgressStreak": 0
+    },
+    {
+      "id": "test-infrastructure",
+      "description": "Vitest + testing-library with 28 tests covering stores, event bus, persistence",
+      "status": "pass",
+      "dependsOn": [],
+      "attempts": 0,
+      "noProgressStreak": 0
+    },
+    {
+      "id": "targeted-persistence",
+      "description": "Every store mutation persists via dedicated IPC handler, no full-table rewrites",
+      "status": "pass",
+      "dependsOn": ["sqlite-migration"],
+      "attempts": 0,
+      "noProgressStreak": 0
+    }
+  ]
+}

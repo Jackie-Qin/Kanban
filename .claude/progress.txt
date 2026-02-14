@@ -1,0 +1,28 @@
+# Kanban Progress
+
+## Last Session: Initial harness setup (2026-02-14)
+
+### What's Done
+- All 8 architecture roadmap items completed (SQLite, handler split, versioning, event bus, ripgrep, error boundaries, tests, targeted persistence)
+- Version 1.2.0 released on GitHub
+- App is stable and in daily use
+
+### Current State
+- No active feature work
+- All tests passing (28 tests)
+- Clean main branch
+
+### What's Next
+- Awaiting new feature requests
+- Potential areas: performance optimization, new panel types, cloud sync, mobile companion
+
+### Known Issues
+- Git panel polls every 3s (`.git` watcher only catches index/ref changes, not working tree edits)
+- Files >5MB rejected from Monaco Editor (intentional guard)
+- No auto-update — users manually download from GitHub releases
+
+### Architecture Notes
+- Terminal PTY processes persist across project switches (CSS visibility toggle)
+- Git `status.files` is the only reliable source — never use convenience arrays
+- Git branch listing must NOT fetch (no network dependency)
+- fetchData uses generation counter to prevent stale polling overwrites

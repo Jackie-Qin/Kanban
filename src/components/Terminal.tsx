@@ -48,6 +48,7 @@ export default function Terminal({
   const userScrolledUpRef = useRef(false)
   const isFittingRef = useRef(false)
   const isWritingRef = useRef(false)
+  const disposedRef = useRef(false)
   const [searchVisible, setSearchVisible] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
@@ -97,6 +98,9 @@ export default function Terminal({
   useEffect(() => {
     const container = terminalRef.current
     if (!container) return
+
+    // Mark as not disposed for this effect instance
+    disposedRef.current = false
 
     // Clear container in case of remount
     container.innerHTML = ''
@@ -333,6 +337,7 @@ export default function Terminal({
 
         // Check if PTY is already running (survived a window close/reopen)
         const ptyAlive = await electron.ptyExists(terminalId)
+        if (disposedRef.current) return
 
         // Helper: scroll to bottom after all init writes are done
         const scrollAfterInit = () => {
@@ -346,6 +351,7 @@ export default function Terminal({
         let hasRestoredBuffer = false
         try {
           const savedBuffer = await electron.loadTerminalBuffer(terminalId)
+          if (disposedRef.current) return
           if (savedBuffer && xtermRef.current) {
             hasRestoredBuffer = true
             isWritingRef.current = true
@@ -360,10 +366,13 @@ export default function Terminal({
           // Ignore buffer restore errors
         }
 
+        if (disposedRef.current) return
+
         if (ptyAlive) {
           // Reconnect: flush any output buffered while the window was closed
           ptyCreatedRef.current = true
           const buffered = await electron.ptyReconnect(terminalId)
+          if (disposedRef.current) return
           if (buffered && xtermRef.current) {
             isWritingRef.current = true
             xtermRef.current.write(buffered, () => {
@@ -371,23 +380,28 @@ export default function Terminal({
               // Scroll to bottom after the final write completes
               scrollAfterInit()
             })
-          } else if (hasRestoredBuffer) {
+          } else if (hasRestoredBuffer && xtermRef.current) {
             // No reconnect data but we restored a buffer — scroll after it settles
             // Use a write callback by writing an empty string to queue after the buffer
-            xtermRef.current!.write('', scrollAfterInit)
+            xtermRef.current.write('', scrollAfterInit)
           } else {
             scrollAfterInit()
           }
-          electron.ptyResize(terminalId, xtermRef.current!.cols, xtermRef.current!.rows)
+          if (xtermRef.current) {
+            electron.ptyResize(terminalId, xtermRef.current.cols, xtermRef.current.rows)
+          }
         } else if (!ptyCreatedRef.current) {
           // No existing PTY — create a fresh one
           const success = await electron.ptyCreate(terminalId, projectPath)
+          if (disposedRef.current) return
           if (success) {
             ptyCreatedRef.current = true
-            electron.ptyResize(terminalId, xtermRef.current!.cols, xtermRef.current!.rows)
+            if (xtermRef.current) {
+              electron.ptyResize(terminalId, xtermRef.current.cols, xtermRef.current.rows)
+            }
           }
-          if (hasRestoredBuffer) {
-            xtermRef.current!.write('', scrollAfterInit)
+          if (hasRestoredBuffer && xtermRef.current) {
+            xtermRef.current.write('', scrollAfterInit)
           } else {
             scrollAfterInit()
           }
@@ -408,6 +422,7 @@ export default function Terminal({
     resizeObserver.observe(container)
 
     return () => {
+      disposedRef.current = true
       clearTimeout(initTimeout)
       if (rafId) cancelAnimationFrame(rafId)
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
