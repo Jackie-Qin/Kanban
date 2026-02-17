@@ -50,6 +50,7 @@ export default function Terminal({
   const isWritingRef = useRef(false)
   const disposedRef = useRef(false)
   const [searchVisible, setSearchVisible] = useState(false)
+  const [isScrolledUp, setIsScrolledUp] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const { themeName, fontSize, fontFamily } = useTerminalSettings()
 
@@ -66,6 +67,10 @@ export default function Terminal({
           // from fit() can fire async DOM scroll events that corrupt
           // userScrolledUpRef after isFittingRef is cleared.
           const shouldSnapToBottom = !userScrolledUpRef.current
+
+          // Save distance from bottom so we can restore position after reflow
+          const buf = term.buffer.active
+          const distFromBottom = buf.baseY - buf.viewportY
 
           isFittingRef.current = true
           fitAddonRef.current.fit()
@@ -84,6 +89,13 @@ export default function Terminal({
             isFittingRef.current = false
             if (shouldSnapToBottom) {
               term.scrollToBottom()
+            } else {
+              // Restore approximate scroll position to prevent jump-to-top
+              const newBuf = term.buffer.active
+              const targetY = Math.max(0, newBuf.baseY - distFromBottom)
+              if (newBuf.viewportY !== targetY) {
+                term.scrollLines(targetY - newBuf.viewportY)
+              }
             }
           })
         } catch (e) {
@@ -146,7 +158,9 @@ export default function Terminal({
       // mark the user as "scrolled up" and prevent auto-scroll.
       if (isFittingRef.current || isWritingRef.current) return
       const buf = xterm.buffer.active
-      userScrolledUpRef.current = buf.viewportY < buf.baseY
+      const scrolledUp = buf.viewportY < buf.baseY
+      userScrolledUpRef.current = scrolledUp
+      setIsScrolledUp(scrolledUp)
     })
 
     // Link provider: clickable [Image #N] references
@@ -248,13 +262,12 @@ export default function Terminal({
         isWritingRef.current = true
         xtermRef.current.write(data, () => {
           isWritingRef.current = false
-          // Defensive: if scroll position drifted (e.g. from a prior reflow)
-          // and the user hasn't intentionally scrolled up, snap back to bottom.
-          if (!userScrolledUpRef.current && xtermRef.current) {
+          // Update scroll button visibility after write
+          if (xtermRef.current) {
             const buf = xtermRef.current.buffer.active
-            if (buf.viewportY < buf.baseY) {
-              xtermRef.current.scrollToBottom()
-            }
+            const scrolledUp = buf.viewportY < buf.baseY
+            userScrolledUpRef.current = scrolledUp
+            setIsScrolledUp(scrolledUp)
           }
         })
 
@@ -311,6 +324,7 @@ export default function Terminal({
           e.preventDefault()
           xterm.clear()
           userScrolledUpRef.current = false
+          setIsScrolledUp(false)
           xterm.scrollToBottom()
           return false
         }
@@ -577,6 +591,15 @@ export default function Terminal({
     }
   }, [searchQuery])
 
+  const handleScrollToBottom = useCallback(() => {
+    if (xtermRef.current) {
+      xtermRef.current.scrollToBottom()
+      userScrolledUpRef.current = false
+      setIsScrolledUp(false)
+      xtermRef.current.focus()
+    }
+  }, [])
+
   const bgColor = getThemeByName(themeName).theme.background || '#14191e'
 
   const [isDragOver, setIsDragOver] = useState(false)
@@ -723,6 +746,18 @@ export default function Terminal({
       >
         <div ref={terminalRef} className="h-full w-full overflow-hidden" />
       </div>
+      {/* Scroll to bottom button */}
+      {isScrolledUp && (
+        <button
+          onClick={handleScrollToBottom}
+          className="absolute bottom-3 right-4 z-10 w-8 h-8 rounded-full border border-white/20 bg-white/10 backdrop-blur-sm flex items-center justify-center text-white/60 hover:text-white hover:bg-white/20 hover:border-white/40 transition-all"
+          title="Scroll to bottom"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      )}
       {/* Drop overlay */}
       {isDragOver && (
         <div className="absolute inset-0 bg-blue-500/10 border-2 border-blue-500 rounded pointer-events-none z-10 flex items-center justify-center">
